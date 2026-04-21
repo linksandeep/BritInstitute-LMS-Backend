@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
-export type VideoType = 'youtube' | 'drive' | 'zoom' | 'other';
+export type VideoType = 'youtube' | 'drive' | 'google_meet' | 'other';
 
 export interface IRecordedLecture extends Document {
   batch: mongoose.Types.ObjectId;
@@ -20,7 +20,7 @@ const recordedLectureSchema = new Schema<IRecordedLecture>(
     title: { type: String, required: true, trim: true },
     description: { type: String, default: '' },
     videoUrl: { type: String, required: true },
-    videoType: { type: String, enum: ['youtube', 'drive', 'zoom', 'other'], default: 'other' },
+    videoType: { type: String, enum: ['youtube', 'drive', 'google_meet', 'other'], default: 'other' },
     order: { type: Number, default: 0 },
     uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },

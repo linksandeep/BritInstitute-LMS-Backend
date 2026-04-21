@@ -5,6 +5,7 @@ import {
   createBatch, getBatches, getBatch,
   updateBatch, deleteBatch,
   addStudentToBatch, removeStudentFromBatch,
+  getStudentBatchReport,
 } from '../controllers/batch.controller';
 
 const router = Router();
@@ -21,5 +22,6 @@ router.delete('/:id', deleteBatch);
 // Student management within a batch
 router.post('/:id/students', addStudentToBatch);
 router.delete('/:id/students/:studentId', removeStudentFromBatch);
+router.get('/:id/students/:studentId/report', getStudentBatchReport);
 
 export default router;

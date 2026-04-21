@@ -3,6 +3,11 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { Batch } from '../models/Batch.model';
 import { User } from '../models/User.model';
+import { Attendance } from '../models/Attendance.model';
+import { LectureProgress } from '../models/LectureProgress.model';
+import { LiveClass } from '../models/LiveClass.model';
+import { RecordedLecture } from '../models/RecordedLecture.model';
+import { Assignment } from '../models/Assignment.model';
 
 // ─── Create Batch ─────────────────────────────────────────────────────────────
 export const createBatch = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -163,6 +168,56 @@ export const removeStudentFromBatch = async (req: AuthRequest, res: Response): P
       .populate('students', 'name username isActive');
 
     res.json({ success: true, batch: populated });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error', error: err });
+  }
+};
+
+// ─── Get Student Report for a Batch ──────────────────────────────────────────
+export const getStudentBatchReport = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { id, studentId } = req.params; // batchId, studentId
+
+    const batch = await Batch.findById(id).populate('course', 'title');
+    if (!batch) {
+      res.status(404).json({ success: false, message: 'Batch not found' });
+      return;
+    }
+
+    const student = await User.findById(studentId);
+    if (!student) {
+      res.status(404).json({ success: false, message: 'Student not found' });
+      return;
+    }
+
+    // 1. Fetch Attendance
+    const attendance = await Attendance.find({ batch: id, student: studentId })
+      .populate('liveClass', 'classNumber topic scheduledAt');
+
+    // 2. Fetch Video Progress
+    const lectures = await RecordedLecture.find({ batch: id }).sort({ order: 1 });
+    const progress = await Promise.all(
+      lectures.map(async (lec) => {
+        const p = await LectureProgress.findOne({ lecture: lec._id, student: studentId });
+        return {
+          lectureTitle: lec.title,
+          watchDuration: p ? p.watchDuration : 0,
+          isCompleted: p ? p.isCompleted : false,
+          totalDuration: 600, // Conceptually 10 mins (600s) is the target
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      report: {
+        student: { name: student.name, username: student.username },
+        batchName: batch.name,
+        courseName: batch.course ? (batch.course as any).title : 'N/A',
+        attendance,
+        videoProgress: progress,
+      }
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error', error: err });
   }

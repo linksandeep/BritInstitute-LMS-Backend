@@ -7,13 +7,13 @@ import { Batch } from '../models/Batch.model';
 
 export const createLiveClass = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { batch, classNumber, topic, zoomLink, scheduledAt, duration } = req.body;
-    if (!batch || !classNumber || !topic || !zoomLink || !scheduledAt) {
+    const { batch, classNumber, topic, meetingLink, scheduledAt, duration } = req.body;
+    if (!batch || !classNumber || !topic || !meetingLink || !scheduledAt) {
       res.status(400).json({ success: false, message: 'All fields are required' });
       return;
     }
     const liveClass = await LiveClass.create({
-      batch, classNumber, topic, zoomLink, scheduledAt, duration: duration || 60,
+      batch, classNumber, topic, meetingLink, scheduledAt, duration: duration || 60,
       createdBy: req.user!.id, status: 'scheduled',
     });
     res.status(201).json({ success: true, liveClass });
@@ -102,9 +102,25 @@ export const markAttend = async (req: AuthRequest, res: Response): Promise<void>
       res.status(404).json({ success: false, message: 'Live class not found' });
       return;
     }
+
     if (cls.status === 'ended') {
       res.status(400).json({ success: false, message: 'This class has already ended' });
       return;
+    }
+
+    // Check if within 30 minutes of scheduled time
+    const now = new Date();
+    const scheduledAt = new Date(cls.scheduledAt);
+    const diffMinutes = (now.getTime() - scheduledAt.getTime()) / (1000 * 60);
+
+    if (diffMinutes < -30) {
+       res.status(400).json({ success: false, message: 'Class has not started yet' });
+       return;
+    }
+
+    if (diffMinutes > 30) {
+       res.status(400).json({ success: false, message: 'Attendance window closed (30 min limit)' });
+       return;
     }
 
     // upsert attendance
