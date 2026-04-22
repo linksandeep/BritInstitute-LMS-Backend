@@ -11,6 +11,7 @@ import recordedRoutes from './routes/recorded.routes';
 import assignmentRoutes from './routes/assignment.routes';
 import batchRoutes from './routes/batch.routes';
 import bookingRoutes from './routes/booking.routes';
+import curriculumRoutes from './routes/curriculum.routes';
 import { startAttendanceJob } from './jobs/attendance.job';
 
 const app: Application = express();
@@ -40,6 +41,7 @@ app.use('/api/recorded', recordedRoutes);
 app.use('/api/assignments', assignmentRoutes);
 app.use('/api/admin/batches', batchRoutes);
 app.use('/api/sessions', bookingRoutes);
+app.use('/api/curriculums', curriculumRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((_req: Request, res: Response) => {
