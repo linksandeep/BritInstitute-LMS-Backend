@@ -96,13 +96,14 @@ export const deleteTeacher = async (req: AuthRequest, res: Response): Promise<vo
 
 export const getSuperAdminStats = async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const [totalTeachers, activeTeachers, totalStudents] = await Promise.all([
+    const [totalTeachers, activeTeachers, totalStudents, totalAdmins] = await Promise.all([
       User.countDocuments({ role: 'teacher' }),
       User.countDocuments({ role: 'teacher', isActive: true }),
       User.countDocuments({ role: 'student' }),
+      User.countDocuments({ role: 'admin', isActive: true }),
     ]);
 
-    res.json({ success: true, stats: { totalTeachers, activeTeachers, totalStudents } });
+    res.json({ success: true, stats: { totalTeachers, activeTeachers, totalStudents, totalAdmins } });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error', error: err });
   }

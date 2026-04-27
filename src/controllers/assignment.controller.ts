@@ -3,6 +3,7 @@ import { AuthRequest } from '../middleware/auth.middleware';
 import { Assignment } from '../models/Assignment.model';
 import { AssignmentSubmission } from '../models/AssignmentSubmission.model';
 import { Batch } from '../models/Batch.model';
+import { User } from '../models/User.model';
 
 export const createAssignment = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -51,14 +52,20 @@ export const getStudentAssignments = async (req: AuthRequest, res: Response): Pr
   }
 };
 
-export const getAllAssignments = async (_req: AuthRequest, res: Response): Promise<void> => {
+export const getAllAssignments = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const assignments = await Assignment.find()
+    const batch = typeof req.query.batch === 'string' ? req.query.batch.trim() : '';
+    const query = batch ? { batch } : {};
+    const assignments = await Assignment.find(query)
       .populate({ path: 'batch', select: 'name course', populate: { path: 'course', select: 'title' } })
-      .sort({ createdAt: -1 });
-    const submissionCounts = await AssignmentSubmission.aggregate([
-      { $group: { _id: '$assignment', count: { $sum: 1 } } },
-    ]);
+      .sort({ dueDate: 1, createdAt: -1 });
+    const assignmentIds = assignments.map((assignment) => assignment._id);
+    const submissionCounts = assignmentIds.length === 0
+      ? []
+      : await AssignmentSubmission.aggregate([
+        { $match: { assignment: { $in: assignmentIds } } },
+        { $group: { _id: '$assignment', count: { $sum: 1 } } },
+      ]);
     const countByAssignment = new Map(submissionCounts.map((item) => [String(item._id), item.count]));
     const enrichedAssignments = assignments.map((assignment) => ({
       ...assignment.toObject(),
@@ -152,8 +159,25 @@ export const getAssignmentSubmissions = async (req: AuthRequest, res: Response):
       return;
     }
 
-    const submissions = await AssignmentSubmission.find({ assignment: req.params.id })
-      .populate('student', 'name username')
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const query: Record<string, unknown> = { assignment: req.params.id };
+    if (search) {
+      const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      const matchingStudents = await User.find({
+        role: 'student',
+        $or: [
+          { name: searchRegex },
+          { username: searchRegex },
+          { phone: searchRegex },
+          { email: searchRegex },
+        ],
+      }).select('_id');
+      query.student = { $in: matchingStudents.map((student) => student._id) };
+    }
+
+    const submissions = await AssignmentSubmission.find(query)
+      .populate('student', 'name username phone email')
+      .populate('batch', 'name')
       .sort({ submittedAt: -1 });
 
     res.json({ success: true, submissions });

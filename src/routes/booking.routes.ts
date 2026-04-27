@@ -21,7 +21,7 @@ router.get('/me', getMyBookings);
 router.patch('/:id/cancel', cancelBooking);
 
 // Admin routes
-router.get('/admin', authorize(['teacher', 'superadmin']), adminGetBookings);
-router.patch('/admin/:id', authorize(['teacher', 'superadmin']), adminUpdateBooking);
+router.get('/admin', authorize(['teacher', 'admin', 'superadmin']), adminGetBookings);
+router.patch('/admin/:id', authorize(['teacher', 'admin', 'superadmin']), adminUpdateBooking);
 
 export default router;

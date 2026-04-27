@@ -8,7 +8,7 @@ import { AuthRequest } from '../middleware/auth.middleware';
 
 export const createUser = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { name, username, password, enrolledCourse } = req.body;
+    const { name, username, password, enrolledCourse, phone, email } = req.body;
     if (!name || !username || !password) {
       res.status(400).json({ success: false, message: 'Name, username and password are required' });
       return;
@@ -18,16 +18,56 @@ export const createUser = async (req: AuthRequest, res: Response): Promise<void>
       res.status(409).json({ success: false, message: 'Username already taken' });
       return;
     }
-    const user = await User.create({ name, username, password, role: 'student', enrolledCourse: enrolledCourse || undefined });
-    res.status(201).json({ success: true, user: { id: user._id, name: user.name, username: user.username, enrolledCourse: user.enrolledCourse } });
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (normalizedEmail) {
+      const existingEmail = await User.findOne({ email: normalizedEmail });
+      if (existingEmail) {
+        res.status(409).json({ success: false, message: 'Email already taken' });
+        return;
+      }
+    }
+
+    const user = await User.create({
+      name,
+      username,
+      password,
+      role: 'student',
+      enrolledCourse: enrolledCourse || undefined,
+      phone: phone?.trim() || '',
+      email: normalizedEmail || '',
+    });
+    res.status(201).json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        username: user.username,
+        enrolledCourse: user.enrolledCourse,
+        phone: user.phone,
+        email: user.email,
+      }
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error', error: err });
   }
 };
 
-export const getUsers = async (_req: AuthRequest, res: Response): Promise<void> => {
+export const getUsers = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const users = await User.find({ role: 'student' }).populate('enrolledCourse', 'title').sort({ createdAt: -1 });
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const query: Record<string, unknown> = { role: 'student' };
+
+    if (search) {
+      const searchRegex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      query.$or = [
+        { name: searchRegex },
+        { username: searchRegex },
+        { phone: searchRegex },
+        { email: searchRegex },
+      ];
+    }
+
+    const users = await User.find(query).populate('enrolledCourse', 'title').sort({ createdAt: -1 });
     res.json({ success: true, users });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error', error: err });
@@ -37,19 +77,49 @@ export const getUsers = async (_req: AuthRequest, res: Response): Promise<void> 
 export const updateUser = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { name, username, password, enrolledCourse, isActive } = req.body;
+    const { name, username, password, enrolledCourse, isActive, phone, email } = req.body;
     const user = await User.findById(id).select('+password');
     if (!user) {
       res.status(404).json({ success: false, message: 'User not found' });
       return;
     }
     if (name) user.name = name;
-    if (username) user.username = username.toLowerCase();
+    if (username && username.toLowerCase() !== user.username) {
+      const existingUsername = await User.findOne({ username: username.toLowerCase(), _id: { $ne: id } });
+      if (existingUsername) {
+        res.status(409).json({ success: false, message: 'Username already taken' });
+        return;
+      }
+      user.username = username.toLowerCase();
+    }
+    if (email !== undefined) {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (normalizedEmail) {
+        const existingEmail = await User.findOne({ email: normalizedEmail, _id: { $ne: id } });
+        if (existingEmail) {
+          res.status(409).json({ success: false, message: 'Email already taken' });
+          return;
+        }
+      }
+      user.email = normalizedEmail;
+    }
+    if (phone !== undefined) user.phone = phone.trim();
     if (enrolledCourse !== undefined) user.enrolledCourse = enrolledCourse || undefined;
     if (isActive !== undefined) user.isActive = isActive;
     if (password) user.password = password; // will be hashed by pre-save hook
     await user.save();
-    res.json({ success: true, user: { id: user._id, name: user.name, username: user.username, enrolledCourse: user.enrolledCourse, isActive: user.isActive } });
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        username: user.username,
+        enrolledCourse: user.enrolledCourse,
+        isActive: user.isActive,
+        phone: user.phone,
+        email: user.email,
+      }
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error', error: err });
   }

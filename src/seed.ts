@@ -170,14 +170,14 @@ async function seed() {
       name: 'Lead Teacher',
       username: 'admin',
       password: 'admin123',
-      role: 'teacher',
+      role: 'admin',
       isActive: true,
     });
     teacherId = teacher._id;
     console.log('✅ Teacher created — username: admin | password: admin123');
   } else {
     teacherExists.name = teacherExists.name || 'Lead Teacher';
-    teacherExists.role = 'teacher';
+    teacherExists.role = 'admin';
     teacherExists.isActive = true;
     teacherExists.password = 'admin123';
     await teacherExists.save();
