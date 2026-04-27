@@ -5,7 +5,7 @@ export interface IUser extends Document {
   name: string;
   username: string;
   password: string;
-  role: 'admin' | 'student';
+  role: 'superadmin' | 'teacher' | 'student';
   enrolledCourse?: mongoose.Types.ObjectId;
   isActive: boolean;
   createdAt: Date;
@@ -18,7 +18,7 @@ const userSchema = new Schema<IUser>(
     name: { type: String, required: true, trim: true },
     username: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true, select: false },
-    role: { type: String, enum: ['admin', 'student'], default: 'student' },
+    role: { type: String, enum: ['superadmin', 'teacher', 'student'], default: 'student' },
     enrolledCourse: { type: Schema.Types.ObjectId, ref: 'Course' },
     isActive: { type: Boolean, default: true },
   },

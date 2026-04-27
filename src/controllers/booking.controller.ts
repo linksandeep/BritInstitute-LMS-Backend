@@ -6,7 +6,7 @@ import { User } from '../models/User.model';
 // Fetch available mentors (admins)
 export const getMentors = async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const mentors = await User.find({ role: 'admin', isActive: true }).select('name username');
+    const mentors = await User.find({ role: 'teacher', isActive: true }).select('name username');
     res.json({ success: true, mentors });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error', error: err });

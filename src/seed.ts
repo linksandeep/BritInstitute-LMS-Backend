@@ -5,6 +5,7 @@ import { Course } from './models/Course.model';
 import { Curriculum } from './models/Curriculum.model';
 import { User } from './models/User.model';
 import { Batch } from './models/Batch.model';
+import { Assignment } from './models/Assignment.model';
 
 dotenv.config();
 
@@ -141,24 +142,47 @@ async function seed() {
     },
   ];
 
-  const adminExists = await db.collection('users').findOne({ username: 'admin' });
-  let adminId = adminExists?._id;
+  const superAdminExists = await db.collection('users').findOne({ username: 'superadmin' });
+  let superAdminId = superAdminExists?._id;
 
-  if (!adminExists) {
-    const hashedPassword = await bcrypt.hash('admin123', 10);
+  if (!superAdminExists) {
+    const hashedPassword = await bcrypt.hash('superadmin123', 10);
     const result = await db.collection('users').insertOne({
-      name: 'Administrator',
-      username: 'admin',
+      name: 'Super Admin',
+      username: 'superadmin',
       password: hashedPassword,
-      role: 'admin',
+      role: 'superadmin',
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    adminId = result.insertedId;
-    console.log('✅ Admin created — username: admin | password: admin123');
+    superAdminId = result.insertedId;
+    console.log('✅ Super Admin created — username: superadmin | password: superadmin123');
   } else {
-    console.log('✅ Admin already exists');
+    console.log('✅ Super Admin already exists');
+  }
+
+  const teacherExists = await User.findOne({ username: 'admin' }).select('+password');
+  let teacherId = teacherExists?._id;
+
+  if (!teacherExists) {
+    const teacher = await User.create({
+      name: 'Lead Teacher',
+      username: 'admin',
+      password: 'admin123',
+      role: 'teacher',
+      isActive: true,
+    });
+    teacherId = teacher._id;
+    console.log('✅ Teacher created — username: admin | password: admin123');
+  } else {
+    teacherExists.name = teacherExists.name || 'Lead Teacher';
+    teacherExists.role = 'teacher';
+    teacherExists.isActive = true;
+    teacherExists.password = 'admin123';
+    await teacherExists.save();
+    teacherId = teacherExists._id;
+    console.log('✅ Existing admin converted to Teacher — username: admin | password: admin123');
   }
 
   for (const item of defaultCurriculums) {
@@ -167,7 +191,7 @@ async function seed() {
       course = await Course.create({
         title: item.title,
         description: item.description,
-        createdBy: adminId,
+        createdBy: teacherId,
       });
       console.log(`✅ Course created: ${item.title}`);
     }
@@ -195,7 +219,7 @@ async function seed() {
         students: [],
         isActive: true,
         startDate: new Date(),
-        createdBy: adminId,
+        createdBy: teacherId,
       });
       console.log(`✅ Test batch created: ${batchName}`);
     } else {
@@ -246,12 +270,50 @@ async function seed() {
     batch.isActive = true;
     await batch.save();
     console.log(`✅ Added 5 students to batch: ${batchName}`);
+
+    const assignmentTemplates = [
+      {
+        title: `${item.title} - Practice Assignment`,
+        description: 'Submit your class practice work. You can share a Google Drive link, file link, Git repo, or written notes.',
+        dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        attachmentUrl: 'https://drive.google.com/',
+      },
+      {
+        title: `${item.title} - Mini Project Submission`,
+        description: 'Upload your mini project with a short explanation of what you built and any blockers you faced.',
+        dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+        attachmentUrl: 'https://docs.google.com/',
+      },
+    ];
+
+    for (const assignmentData of assignmentTemplates) {
+      const existingAssignment = await Assignment.findOne({ batch: batch._id, title: assignmentData.title });
+      if (!existingAssignment) {
+        await Assignment.create({
+          ...assignmentData,
+          batch: batch._id,
+          createdBy: teacherId,
+        });
+        console.log(`✅ Test assignment created: ${assignmentData.title}`);
+      } else {
+        existingAssignment.description = assignmentData.description;
+        existingAssignment.dueDate = assignmentData.dueDate;
+        existingAssignment.attachmentUrl = assignmentData.attachmentUrl;
+        await existingAssignment.save();
+        console.log(`✅ Test assignment updated: ${assignmentData.title}`);
+      }
+    }
   }
 
-  console.log('\nAdmin Login');
+  console.log('\nSuper Admin Login');
+  console.log(`username: superadmin`);
+  console.log(`password: superadmin123`);
+  console.log(`id: ${String(superAdminId)}`);
+
+  console.log('\nTeacher Login');
   console.log(`username: admin`);
   console.log(`password: admin123`);
-  console.log(`id: ${String(adminId)}`);
+  console.log(`id: ${String(teacherId)}`);
 
   console.log('\nStudent Logins');
   for (const student of seededStudents) {

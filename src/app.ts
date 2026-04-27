@@ -12,6 +12,7 @@ import assignmentRoutes from './routes/assignment.routes';
 import batchRoutes from './routes/batch.routes';
 import bookingRoutes from './routes/booking.routes';
 import curriculumRoutes from './routes/curriculum.routes';
+import superAdminRoutes from './routes/superadmin.routes';
 import { startAttendanceJob } from './jobs/attendance.job';
 
 const app: Application = express();
@@ -42,6 +43,7 @@ app.use('/api/assignments', assignmentRoutes);
 app.use('/api/admin/batches', batchRoutes);
 app.use('/api/sessions', bookingRoutes);
 app.use('/api/curriculums', curriculumRoutes);
+app.use('/api/superadmin', superAdminRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((_req: Request, res: Response) => {
