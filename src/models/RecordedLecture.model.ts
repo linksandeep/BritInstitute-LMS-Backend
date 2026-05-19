@@ -4,6 +4,7 @@ export type VideoType = 'youtube' | 'drive' | 'google_meet' | 'other';
 
 export interface IRecordedLecture extends Document {
   batch: mongoose.Types.ObjectId;
+  liveClass?: mongoose.Types.ObjectId;
   title: string;
   description: string;
   videoUrl: string;
@@ -17,6 +18,7 @@ export interface IRecordedLecture extends Document {
 const recordedLectureSchema = new Schema<IRecordedLecture>(
   {
     batch: { type: Schema.Types.ObjectId, ref: 'Batch', required: true },
+    liveClass: { type: Schema.Types.ObjectId, ref: 'LiveClass' },
     title: { type: String, required: true, trim: true },
     description: { type: String, default: '' },
     videoUrl: { type: String, required: true },
@@ -28,5 +30,6 @@ const recordedLectureSchema = new Schema<IRecordedLecture>(
 );
 
 recordedLectureSchema.index({ batch: 1, order: 1 });
+recordedLectureSchema.index({ liveClass: 1 }, { unique: true, sparse: true });
 
 export const RecordedLecture = mongoose.model<IRecordedLecture>('RecordedLecture', recordedLectureSchema);

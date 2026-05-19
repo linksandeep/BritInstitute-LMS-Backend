@@ -4,6 +4,7 @@ import { LiveClass } from '../models/LiveClass.model';
 import { Attendance } from '../models/Attendance.model';
 import { Batch } from '../models/Batch.model';
 import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting, ZoomApiError } from '../services/zoom.service';
+import { deleteRecordedLectureForLiveClass, syncRecordedLectureForLiveClass } from '../services/recordedLectureSync.service';
 
 const sendLiveClassError = (res: Response, err: unknown, fallback: string): void => {
   if (err instanceof ZoomApiError) {
@@ -51,6 +52,7 @@ export const createLiveClass = async (req: AuthRequest, res: Response): Promise<
       duration: meetingDuration,
       createdBy: req.user!.id, status: 'scheduled',
     });
+    await syncRecordedLectureForLiveClass(liveClass);
     res.status(201).json({ success: true, liveClass });
   } catch (err) {
     sendLiveClassError(res, err, 'Unable to create live class. Please try again.');
@@ -147,6 +149,7 @@ export const updateLiveClass = async (req: AuthRequest, res: Response): Promise<
       res.status(404).json({ success: false, message: 'Live class not found' });
       return;
     }
+    await syncRecordedLectureForLiveClass(cls);
     res.json({ success: true, liveClass: cls });
   } catch (err) {
     sendLiveClassError(res, err, 'Unable to update live class. Please try again.');
@@ -172,6 +175,7 @@ export const deleteLiveClass = async (req: AuthRequest, res: Response): Promise<
     }
 
     await cls.deleteOne();
+    await deleteRecordedLectureForLiveClass(String(cls._id));
     res.json({
       success: true,
       message: warning ? 'Live class deleted from LMS. Zoom cleanup needs attention.' : 'Live class deleted',

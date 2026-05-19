@@ -6,10 +6,60 @@ import { Curriculum } from './models/Curriculum.model';
 import { User } from './models/User.model';
 import { Batch } from './models/Batch.model';
 import { Assignment } from './models/Assignment.model';
+import { LiveClass } from './models/LiveClass.model';
+import { Booking } from './models/Booking.model';
+import { createZoomMeeting, updateZoomMeeting } from './services/zoom.service';
+import { syncRecordedLectureForLiveClass } from './services/recordedLectureSync.service';
 
 dotenv.config();
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/britInstiuteLMS';
+const requestedSeedPassword = 'Pass@123';
+
+const upsertSeedUser = async ({
+  name,
+  username,
+  password,
+  role,
+  enrolledCourse,
+}: {
+  name: string;
+  username: string;
+  password: string;
+  role: 'teacher' | 'student';
+  enrolledCourse?: mongoose.Types.ObjectId;
+}) => {
+  let user = await User.findOne({ username }).select('+password');
+
+  if (!user) {
+    user = await User.create({
+      name,
+      username,
+      password,
+      role,
+      enrolledCourse,
+      isActive: true,
+    });
+    console.log(`✅ ${role === 'teacher' ? 'Teacher' : 'Student'} created — username: ${username} | password: ${password}`);
+    return user;
+  }
+
+  user.name = name;
+  user.role = role;
+  user.isActive = true;
+  user.password = password;
+  if (enrolledCourse) user.enrolledCourse = enrolledCourse;
+  await user.save();
+  console.log(`✅ ${role === 'teacher' ? 'Teacher' : 'Student'} updated — username: ${username} | password: ${password}`);
+  return user;
+};
+
+const scheduledDate = (daysFromNow: number, hour: number, minute = 0) => {
+  const date = new Date();
+  date.setDate(date.getDate() + daysFromNow);
+  date.setHours(hour, minute, 0, 0);
+  return date;
+};
 
 async function seed() {
   await mongoose.connect(MONGO_URI);
@@ -185,6 +235,13 @@ async function seed() {
     console.log('✅ Existing admin converted to Teacher — username: admin | password: admin123');
   }
 
+  const requestedTeacher = await upsertSeedUser({
+    name: 'Seed Teacher',
+    username: 'teacher',
+    password: requestedSeedPassword,
+    role: 'teacher',
+  });
+
   for (const item of defaultCurriculums) {
     let course = await Course.findOne({ title: item.title });
     if (!course) {
@@ -305,6 +362,203 @@ async function seed() {
     }
   }
 
+  const seedTeacherId = requestedTeacher._id as mongoose.Types.ObjectId;
+  const seedCourseTitle = 'Seeded Zoom Data Analytics Curriculum';
+  const seedCourseDescription = 'Seeded course with curriculum, Zoom live classes, recorded lecture placeholders, and a 1:1 request.';
+  let seedCourse = await Course.findOne({ title: seedCourseTitle });
+
+  if (!seedCourse) {
+    seedCourse = await Course.create({
+      title: seedCourseTitle,
+      description: seedCourseDescription,
+      createdBy: seedTeacherId,
+      isPublic: true,
+      assignedTeachers: [],
+    });
+    console.log(`✅ Seed course created: ${seedCourseTitle}`);
+  } else {
+    seedCourse.description = seedCourseDescription;
+    seedCourse.createdBy = seedTeacherId;
+    seedCourse.isPublic = true;
+    seedCourse.assignedTeachers = [];
+    await seedCourse.save();
+    console.log(`✅ Seed course updated: ${seedCourseTitle}`);
+  }
+
+  const requestedStudent = await upsertSeedUser({
+    name: 'Vikash Kumar',
+    username: 'vikash',
+    password: requestedSeedPassword,
+    role: 'student',
+    enrolledCourse: seedCourse._id as mongoose.Types.ObjectId,
+  });
+
+  const seedBatchName = 'Seeded Zoom Data Analytics - Vikash Batch';
+  let seedBatch = await Batch.findOne({ name: seedBatchName, course: seedCourse._id });
+  if (!seedBatch) {
+    seedBatch = await Batch.create({
+      name: seedBatchName,
+      description: 'Seeded batch for Vikash with Zoom live classes and recorded lecture entries.',
+      course: seedCourse._id,
+      students: [requestedStudent._id],
+      isActive: true,
+      startDate: new Date(),
+      createdBy: seedTeacherId,
+    });
+    console.log(`✅ Seed batch created: ${seedBatchName}`);
+  } else {
+    seedBatch.description = 'Seeded batch for Vikash with Zoom live classes and recorded lecture entries.';
+    seedBatch.students = [requestedStudent._id as mongoose.Types.ObjectId];
+    seedBatch.isActive = true;
+    seedBatch.createdBy = seedTeacherId;
+    await seedBatch.save();
+    console.log(`✅ Seed batch updated: ${seedBatchName}`);
+  }
+
+  const meetingSeeds = [
+    {
+      classNumber: 'Class 1',
+      topic: 'Zoom Orientation and LMS Walkthrough',
+      duration: 60,
+      scheduledAt: scheduledDate(1, 20),
+    },
+    {
+      classNumber: 'Class 2',
+      topic: 'Analytics Foundations with Excel',
+      duration: 75,
+      scheduledAt: scheduledDate(2, 20),
+    },
+    {
+      classNumber: 'Class 3',
+      topic: 'Dashboard Planning and Reporting',
+      duration: 90,
+      scheduledAt: scheduledDate(3, 20),
+    },
+  ];
+
+  const curriculumTopics = [];
+
+  for (const meeting of meetingSeeds) {
+    let liveClass = await LiveClass.findOne({
+      batch: seedBatch._id,
+      classNumber: meeting.classNumber,
+      topic: meeting.topic,
+    });
+
+    let meetingLink = liveClass?.meetingLink || '';
+    let zoomMeetingId = liveClass?.zoomMeetingId;
+    let zoomStartUrl = liveClass?.zoomStartUrl;
+
+    if (zoomMeetingId) {
+      await updateZoomMeeting(zoomMeetingId, {
+        topic: `${meeting.classNumber} - ${meeting.topic}`,
+        startTime: meeting.scheduledAt,
+        duration: meeting.duration,
+      });
+    } else {
+      const zoomMeeting = await createZoomMeeting({
+        topic: `${meeting.classNumber} - ${meeting.topic}`,
+        startTime: meeting.scheduledAt,
+        duration: meeting.duration,
+      });
+      meetingLink = zoomMeeting.join_url;
+      zoomMeetingId = String(zoomMeeting.id);
+      zoomStartUrl = zoomMeeting.start_url;
+    }
+
+    if (!liveClass) {
+      liveClass = await LiveClass.create({
+        batch: seedBatch._id,
+        classNumber: meeting.classNumber,
+        topic: meeting.topic,
+        meetingLink,
+        zoomMeetingId,
+        zoomStartUrl,
+        scheduledAt: meeting.scheduledAt,
+        duration: meeting.duration,
+        status: 'scheduled',
+        createdBy: seedTeacherId,
+      });
+      console.log(`✅ Seed Zoom class created: ${meeting.classNumber} - ${meeting.topic}`);
+    } else {
+      liveClass.meetingLink = meetingLink;
+      liveClass.zoomMeetingId = zoomMeetingId;
+      liveClass.zoomStartUrl = zoomStartUrl;
+      liveClass.scheduledAt = meeting.scheduledAt;
+      liveClass.duration = meeting.duration;
+      liveClass.status = 'scheduled';
+      liveClass.createdBy = seedTeacherId;
+      await liveClass.save();
+      console.log(`✅ Seed Zoom class updated: ${meeting.classNumber} - ${meeting.topic}`);
+    }
+
+    await syncRecordedLectureForLiveClass(liveClass);
+
+    curriculumTopics.push({
+      title: meeting.topic,
+      duration: meeting.duration,
+      scheduledAt: meeting.scheduledAt,
+      meetingLink,
+      liveClassId: liveClass._id,
+    });
+  }
+
+  let seedCurriculum = await Curriculum.findOne({ course: seedCourse._id, batch: seedBatch._id });
+  const seedCurriculumModules = [
+    {
+      title: 'Module 1: Live Zoom Foundations',
+      topics: curriculumTopics,
+    },
+  ];
+
+  if (!seedCurriculum) {
+    seedCurriculum = await Curriculum.create({
+      title: seedCourseTitle,
+      course: seedCourse._id,
+      batch: seedBatch._id,
+      modules: seedCurriculumModules,
+    });
+    console.log(`✅ Seed curriculum created: ${seedCourseTitle}`);
+  } else {
+    seedCurriculum.title = seedCourseTitle;
+    seedCurriculum.modules = seedCurriculumModules;
+    await seedCurriculum.save();
+    console.log(`✅ Seed curriculum updated: ${seedCourseTitle}`);
+  }
+
+  const bookingTopic = '1:1 Project Guidance Request';
+  let seedBooking = await Booking.findOne({
+    student: requestedStudent._id,
+    mentor: requestedTeacher._id,
+    topic: bookingTopic,
+  });
+
+  if (!seedBooking) {
+    seedBooking = await Booking.create({
+      student: requestedStudent._id,
+      mentor: requestedTeacher._id,
+      topic: bookingTopic,
+      dateTime: scheduledDate(4, 18),
+      duration: 30,
+      status: 'pending',
+    });
+    console.log('✅ Seed 1:1 request created for admin/teacher approval');
+  } else {
+    seedBooking.dateTime = scheduledDate(4, 18);
+    seedBooking.duration = 30;
+    if (seedBooking.status === 'cancelled') seedBooking.status = 'pending';
+    await seedBooking.save();
+    console.log('✅ Seed 1:1 request updated for admin/teacher approval');
+  }
+
+  seededStudents.push({
+    courseTitle: seedCourseTitle,
+    name: requestedStudent.name,
+    username: requestedStudent.username,
+    password: requestedSeedPassword,
+    id: String(requestedStudent._id),
+  });
+
   console.log('\nSuper Admin Login');
   console.log(`username: superadmin`);
   console.log(`password: superadmin123`);
@@ -314,6 +568,11 @@ async function seed() {
   console.log(`username: admin`);
   console.log(`password: admin123`);
   console.log(`id: ${String(teacherId)}`);
+
+  console.log('\nRequested Teacher Login');
+  console.log(`username: teacher`);
+  console.log(`password: ${requestedSeedPassword}`);
+  console.log(`id: ${String(requestedTeacher._id)}`);
 
   console.log('\nStudent Logins');
   for (const student of seededStudents) {

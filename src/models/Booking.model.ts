@@ -8,6 +8,8 @@ export interface IBooking extends Document {
   duration: number; // in minutes
   status: 'pending' | 'accepted' | 'completed' | 'cancelled';
   meetingLink?: string;
+  zoomMeetingId?: string;
+  zoomStartUrl?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -25,6 +27,8 @@ const bookingSchema = new Schema<IBooking>(
       default: 'pending' 
     },
     meetingLink: { type: String },
+    zoomMeetingId: { type: String, trim: true },
+    zoomStartUrl: { type: String },
   },
   { timestamps: true }
 );

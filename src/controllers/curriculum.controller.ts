@@ -6,6 +6,7 @@ import { Course } from '../models/Course.model';
 import { Curriculum } from '../models/Curriculum.model';
 import { LiveClass } from '../models/LiveClass.model';
 import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting, ZoomApiError } from '../services/zoom.service';
+import { deleteRecordedLectureForLiveClass, syncRecordedLectureForLiveClass } from '../services/recordedLectureSync.service';
 
 const getObjectId = (value: any) => new mongoose.Types.ObjectId(value?._id || value);
 
@@ -66,6 +67,7 @@ const deleteLinkedLiveClasses = async (ids: string[]) => {
   }
 
   await LiveClass.deleteMany({ _id: { $in: ids } });
+  await Promise.all(ids.map((id) => deleteRecordedLectureForLiveClass(id)));
 };
 
 const cloneTemplateToBatch = async (template: any, batchId: string, batchCourse: mongoose.Types.ObjectId) => {
@@ -119,6 +121,7 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
           await deleteZoomMeeting(liveClass.zoomMeetingId);
         }
         await liveClass?.deleteOne();
+        await deleteRecordedLectureForLiveClass(String(topic.liveClassId));
         delete topic.liveClassId;
         topic.meetingLink = '';
       }
@@ -162,9 +165,11 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
         };
 
         if (existingLiveClass) {
-          await LiveClass.findByIdAndUpdate(topic.liveClassId, payload, { new: true });
+          const updatedLiveClass = await LiveClass.findByIdAndUpdate(topic.liveClassId, payload, { new: true });
+          if (updatedLiveClass) await syncRecordedLectureForLiveClass(updatedLiveClass);
         } else {
           const liveClass = await LiveClass.create(payload);
+          await syncRecordedLectureForLiveClass(liveClass);
           topic.liveClassId = liveClass._id;
         }
 
