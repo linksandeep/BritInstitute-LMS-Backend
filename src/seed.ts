@@ -404,16 +404,16 @@ async function seed() {
   }
 
   const requestedStudent = await upsertSeedUser({
-    name: 'Vikash Kumar',
-    username: 'vikash',
+    name: 'Vikas Kumar',
+    username: 'vikas',
     password: requestedSeedPassword,
     role: 'student',
     enrolledCourse: seedCourse._id as mongoose.Types.ObjectId,
-    previousUsernames: ['vikas'],
+    previousUsernames: ['vikash'],
   });
 
-  const seedBatchName = 'Seeded Zoom Data Analytics - Vikash Batch';
-  const previousSeedBatchNames = ['Seeded Zoom Data Analytics - Vikas Batch'];
+  const seedBatchName = 'Seeded Zoom Data Analytics - Vikas Batch';
+  const previousSeedBatchNames = ['Seeded Zoom Data Analytics - Vikash Batch'];
   let seedBatch = await Batch.findOne({ name: seedBatchName, course: seedCourse._id });
   if (!seedBatch) {
     for (const previousName of previousSeedBatchNames) {
@@ -425,7 +425,7 @@ async function seed() {
   if (!seedBatch) {
     seedBatch = await Batch.create({
       name: seedBatchName,
-      description: 'Seeded batch for Vikash with Zoom live classes and recorded lecture entries.',
+      description: 'Seeded batch for Vikas with Zoom live classes and recorded lecture entries.',
       course: seedCourse._id,
       students: [requestedStudent._id],
       isActive: true,
@@ -435,7 +435,7 @@ async function seed() {
     console.log(`✅ Seed batch created: ${seedBatchName}`);
   } else {
     seedBatch.name = seedBatchName;
-    seedBatch.description = 'Seeded batch for Vikash with Zoom live classes and recorded lecture entries.';
+    seedBatch.description = 'Seeded batch for Vikas with Zoom live classes and recorded lecture entries.';
     seedBatch.students = [requestedStudent._id as mongoose.Types.ObjectId];
     seedBatch.isActive = true;
     seedBatch.createdBy = seedTeacherId;
