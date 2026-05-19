@@ -8,7 +8,8 @@ import { Batch } from './models/Batch.model';
 import { Assignment } from './models/Assignment.model';
 import { LiveClass } from './models/LiveClass.model';
 import { Booking } from './models/Booking.model';
-import { createZoomMeeting, updateZoomMeeting } from './services/zoom.service';
+import { RecordedLecture } from './models/RecordedLecture.model';
+import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting } from './services/zoom.service';
 import { syncRecordedLectureForLiveClass } from './services/recordedLectureSync.service';
 
 dotenv.config();
@@ -22,19 +23,30 @@ const upsertSeedUser = async ({
   password,
   role,
   enrolledCourse,
+  previousUsernames = [],
 }: {
   name: string;
   username: string;
   password: string;
   role: 'teacher' | 'student';
   enrolledCourse?: mongoose.Types.ObjectId;
+  previousUsernames?: string[];
 }) => {
-  let user = await User.findOne({ username }).select('+password');
+  const normalizedUsername = username.toLowerCase().trim();
+  const usernameAliases = previousUsernames.map((item) => item.toLowerCase().trim()).filter(Boolean);
+  let user: any = await User.findOne({ username: normalizedUsername }).select('+password');
+
+  if (!user) {
+    for (const alias of usernameAliases) {
+      user = await User.findOne({ username: alias }).select('+password');
+      if (user) break;
+    }
+  }
 
   if (!user) {
     user = await User.create({
       name,
-      username,
+      username: normalizedUsername,
       password,
       role,
       enrolledCourse,
@@ -45,6 +57,7 @@ const upsertSeedUser = async ({
   }
 
   user.name = name;
+  user.username = normalizedUsername;
   user.role = role;
   user.isActive = true;
   user.password = password;
@@ -59,6 +72,11 @@ const scheduledDate = (daysFromNow: number, hour: number, minute = 0) => {
   date.setDate(date.getDate() + daysFromNow);
   date.setHours(hour, minute, 0, 0);
   return date;
+};
+
+const getErrorMessage = (error: unknown) => {
+  if (error instanceof Error) return error.message;
+  return 'Unknown error';
 };
 
 async function seed() {
@@ -391,10 +409,19 @@ async function seed() {
     password: requestedSeedPassword,
     role: 'student',
     enrolledCourse: seedCourse._id as mongoose.Types.ObjectId,
+    previousUsernames: ['vikas'],
   });
 
   const seedBatchName = 'Seeded Zoom Data Analytics - Vikash Batch';
+  const previousSeedBatchNames = ['Seeded Zoom Data Analytics - Vikas Batch'];
   let seedBatch = await Batch.findOne({ name: seedBatchName, course: seedCourse._id });
+  if (!seedBatch) {
+    for (const previousName of previousSeedBatchNames) {
+      seedBatch = await Batch.findOne({ name: previousName, course: seedCourse._id });
+      if (seedBatch) break;
+    }
+  }
+
   if (!seedBatch) {
     seedBatch = await Batch.create({
       name: seedBatchName,
@@ -407,12 +434,44 @@ async function seed() {
     });
     console.log(`✅ Seed batch created: ${seedBatchName}`);
   } else {
+    seedBatch.name = seedBatchName;
     seedBatch.description = 'Seeded batch for Vikash with Zoom live classes and recorded lecture entries.';
     seedBatch.students = [requestedStudent._id as mongoose.Types.ObjectId];
     seedBatch.isActive = true;
     seedBatch.createdBy = seedTeacherId;
     await seedBatch.save();
     console.log(`✅ Seed batch updated: ${seedBatchName}`);
+  }
+
+  const staleSeedBatches = await Batch.find({
+    name: { $in: previousSeedBatchNames },
+    course: seedCourse._id,
+    _id: { $ne: seedBatch._id },
+  });
+
+  for (const staleBatch of staleSeedBatches) {
+    const staleLiveClasses = await LiveClass.find({ batch: staleBatch._id });
+    for (const staleLiveClass of staleLiveClasses) {
+      if (staleLiveClass.zoomMeetingId) {
+        try {
+          await deleteZoomMeeting(staleLiveClass.zoomMeetingId);
+        } catch (error) {
+          console.warn(`⚠️ Could not delete stale Zoom meeting ${staleLiveClass.zoomMeetingId}: ${getErrorMessage(error)}`);
+        }
+      }
+    }
+
+    const staleLiveClassIds = staleLiveClasses.map((liveClass) => liveClass._id);
+    await RecordedLecture.deleteMany({
+      $or: [
+        { batch: staleBatch._id },
+        { liveClass: { $in: staleLiveClassIds } },
+      ],
+    });
+    await LiveClass.deleteMany({ batch: staleBatch._id });
+    await Curriculum.deleteMany({ batch: staleBatch._id, title: seedCourseTitle });
+    await staleBatch.deleteOne();
+    console.log(`✅ Removed stale seed batch: ${staleBatch.name}`);
   }
 
   const meetingSeeds = [
