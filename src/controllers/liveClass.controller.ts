@@ -3,7 +3,16 @@ import { AuthRequest } from '../middleware/auth.middleware';
 import { LiveClass } from '../models/LiveClass.model';
 import { Attendance } from '../models/Attendance.model';
 import { Batch } from '../models/Batch.model';
-import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting } from '../services/zoom.service';
+import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting, ZoomApiError } from '../services/zoom.service';
+
+const sendLiveClassError = (res: Response, err: unknown, fallback: string): void => {
+  if (err instanceof ZoomApiError) {
+    res.status(502).json({ success: false, message: err.message });
+    return;
+  }
+
+  res.status(500).json({ success: false, message: fallback });
+};
 
 export const createLiveClass = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -39,7 +48,7 @@ export const createLiveClass = async (req: AuthRequest, res: Response): Promise<
     });
     res.status(201).json({ success: true, liveClass });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    sendLiveClassError(res, err, 'Unable to create live class. Please try again.');
   }
 };
 
@@ -49,7 +58,7 @@ export const getLiveClassesByBatch = async (req: AuthRequest, res: Response): Pr
     const liveClasses = await LiveClass.find({ batch: batchId }).sort({ scheduledAt: -1 });
     res.json({ success: true, liveClasses });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    sendLiveClassError(res, err, 'Unable to load live classes. Please try again.');
   }
 };
 
@@ -75,7 +84,7 @@ export const getStudentLiveClasses = async (req: AuthRequest, res: Response): Pr
     );
     res.json({ success: true, liveClasses: enriched });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    sendLiveClassError(res, err, 'Unable to load your live classes. Please try again.');
   }
 };
 
@@ -84,7 +93,7 @@ export const getAllLiveClasses = async (_req: AuthRequest, res: Response): Promi
     const liveClasses = await LiveClass.find().populate('batch', 'name').sort({ scheduledAt: -1 });
     res.json({ success: true, liveClasses });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    sendLiveClassError(res, err, 'Unable to load live classes. Please try again.');
   }
 };
 
@@ -135,7 +144,7 @@ export const updateLiveClass = async (req: AuthRequest, res: Response): Promise<
     }
     res.json({ success: true, liveClass: cls });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    sendLiveClassError(res, err, 'Unable to update live class. Please try again.');
   }
 };
 
@@ -154,7 +163,7 @@ export const deleteLiveClass = async (req: AuthRequest, res: Response): Promise<
     await cls.deleteOne();
     res.json({ success: true, message: 'Live class deleted' });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    sendLiveClassError(res, err, 'Unable to delete live class. Please try again.');
   }
 };
 
@@ -200,7 +209,7 @@ export const markAttend = async (req: AuthRequest, res: Response): Promise<void>
 
     res.json({ success: true, attendance: att });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    sendLiveClassError(res, err, 'Unable to join this class. Please try again.');
   }
 };
 
@@ -211,7 +220,7 @@ export const getClassAttendance = async (req: AuthRequest, res: Response): Promi
     const attendance = await Attendance.find({ liveClass: classId }).populate('student', 'name username');
     res.json({ success: true, attendance });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    sendLiveClassError(res, err, 'Unable to load class attendance. Please try again.');
   }
 };
 
@@ -224,7 +233,7 @@ export const getStudentAttendance = async (req: AuthRequest, res: Response): Pro
       .sort({ createdAt: -1 });
     res.json({ success: true, attendance });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    sendLiveClassError(res, err, 'Unable to load attendance. Please try again.');
   }
 };
 

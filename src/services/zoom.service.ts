@@ -20,6 +20,31 @@ interface ZoomMeetingInput {
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
+export class ZoomApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ZoomApiError';
+    this.status = status;
+  }
+}
+
+const getZoomErrorMessage = async (response: Response, fallback: string): Promise<string> => {
+  const body = await response.text();
+  if (!body) return fallback;
+
+  try {
+    const parsed = JSON.parse(body) as { message?: string; reason?: string; code?: number };
+    const zoomMessage = parsed.message || parsed.reason;
+    if (zoomMessage) return `Zoom error: ${zoomMessage}`;
+  } catch {
+    // Keep the plain-text body below.
+  }
+
+  return `Zoom error: ${body}`;
+};
+
 const ensureZoomConfig = (): void => {
   if (!config.zoom.accountId || !config.zoom.clientId || !config.zoom.clientSecret) {
     throw new Error('Zoom API credentials are not configured');
@@ -43,8 +68,8 @@ const getAccessToken = async (): Promise<string> => {
   });
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Zoom token request failed (${response.status}): ${body}`);
+    const message = await getZoomErrorMessage(response, 'Unable to authenticate with Zoom. Please check Zoom credentials.');
+    throw new ZoomApiError(message, response.status);
   }
 
   const data = (await response.json()) as ZoomTokenResponse;
@@ -82,8 +107,8 @@ export const createZoomMeeting = async ({ topic, startTime, duration }: ZoomMeet
   });
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Zoom meeting creation failed (${response.status}): ${body}`);
+    const message = await getZoomErrorMessage(response, 'Unable to create Zoom meeting. Please check Zoom app scopes and account access.');
+    throw new ZoomApiError(message, response.status);
   }
 
   return (await response.json()) as ZoomMeetingResponse;
@@ -109,8 +134,8 @@ export const updateZoomMeeting = async (
   });
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Zoom meeting update failed (${response.status}): ${body}`);
+    const message = await getZoomErrorMessage(response, 'Unable to update Zoom meeting.');
+    throw new ZoomApiError(message, response.status);
   }
 };
 
@@ -124,7 +149,7 @@ export const deleteZoomMeeting = async (meetingId: string): Promise<void> => {
   });
 
   if (!response.ok && response.status !== 404) {
-    const body = await response.text();
-    throw new Error(`Zoom meeting deletion failed (${response.status}): ${body}`);
+    const message = await getZoomErrorMessage(response, 'Unable to delete Zoom meeting.');
+    throw new ZoomApiError(message, response.status);
   }
 };

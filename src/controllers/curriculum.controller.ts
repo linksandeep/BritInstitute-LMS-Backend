@@ -5,9 +5,16 @@ import { Batch } from '../models/Batch.model';
 import { Course } from '../models/Course.model';
 import { Curriculum } from '../models/Curriculum.model';
 import { LiveClass } from '../models/LiveClass.model';
-import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting } from '../services/zoom.service';
+import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting, ZoomApiError } from '../services/zoom.service';
 
 const getObjectId = (value: any) => new mongoose.Types.ObjectId(value?._id || value);
+
+const getControllerErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof ZoomApiError) return error.message;
+  return fallback;
+};
+
+const getControllerErrorStatus = (error: unknown) => (error instanceof ZoomApiError ? 502 : 500);
 
 const stripIds = (modules: any[]) =>
   modules.map((module) => ({
@@ -171,7 +178,7 @@ export const getDefaultCurriculums = async (_req: AuthRequest, res: Response): P
 
     res.json({ success: true, curriculums });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error });
+    res.status(500).json({ success: false, message: 'Unable to load curriculums. Please try again.' });
   }
 };
 
@@ -243,7 +250,7 @@ export const getBatchCurriculum = async (req: AuthRequest, res: Response): Promi
 
     res.json({ success: true, curriculum });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error });
+    res.status(500).json({ success: false, message: 'Unable to load curriculum. Please try again.' });
   }
 };
 
@@ -291,7 +298,10 @@ export const assignCurriculumToBatch = async (req: AuthRequest, res: Response): 
     const populatedCurriculum = await Curriculum.findById(newCurriculum._id).populate('course', 'title description');
     res.json({ success: true, message: 'Curriculum assigned to batch. Each batch supports exactly one curriculum.', curriculum: populatedCurriculum });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error });
+    res.status(getControllerErrorStatus(error)).json({
+      success: false,
+      message: getControllerErrorMessage(error, 'Unable to assign curriculum. Please try again.'),
+    });
   }
 };
 
@@ -332,7 +342,10 @@ export const updateBatchCurriculum = async (req: AuthRequest, res: Response): Pr
     const updatedCurriculum = await Curriculum.findById(curriculum._id).populate('course', 'title description');
     res.json({ success: true, curriculum: updatedCurriculum });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error });
+    res.status(getControllerErrorStatus(error)).json({
+      success: false,
+      message: getControllerErrorMessage(error, 'Unable to save curriculum. Please try again.'),
+    });
   }
 };
 
@@ -352,6 +365,6 @@ export const getMyCurriculum = async (req: AuthRequest, res: Response): Promise<
 
     res.json({ success: true, curriculum, batch: activeBatch });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error', error });
+    res.status(500).json({ success: false, message: 'Unable to load your curriculum. Please try again.' });
   }
 };
