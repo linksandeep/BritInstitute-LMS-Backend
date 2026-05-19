@@ -1,16 +1,37 @@
 import { Response } from 'express';
 import { User } from '../models/User.model';
 import { AuthRequest } from '../middleware/auth.middleware';
+import {
+  getErrorMessage,
+  getDuplicateKeyMessage,
+  normalizeName,
+  normalizeUsername,
+  validatePassword,
+  validateUsername,
+} from '../utils/validation';
 
 export const createTeacher = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { name, username, password } = req.body;
+    const name = normalizeName(req.body.name);
+    const username = normalizeUsername(req.body.username);
+    const password = String(req.body.password || '');
     if (!name || !username || !password) {
       res.status(400).json({ success: false, message: 'Name, username and password are required' });
       return;
     }
 
-    const existingUser = await User.findOne({ username: username.toLowerCase() });
+    const usernameError = validateUsername(username);
+    if (usernameError) {
+      res.status(400).json({ success: false, message: usernameError });
+      return;
+    }
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      res.status(400).json({ success: false, message: passwordError });
+      return;
+    }
+
+    const existingUser = await User.findOne({ username });
     if (existingUser) {
       res.status(409).json({ success: false, message: 'Username already taken' });
       return;
@@ -35,7 +56,8 @@ export const createTeacher = async (req: AuthRequest, res: Response): Promise<vo
       },
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    const duplicateMessage = getDuplicateKeyMessage(err);
+    res.status(duplicateMessage ? 409 : 500).json({ success: false, message: duplicateMessage || getErrorMessage(err) });
   }
 };
 
@@ -44,14 +66,17 @@ export const getTeachers = async (_req: AuthRequest, res: Response): Promise<voi
     const teachers = await User.find({ role: 'teacher' }).sort({ createdAt: -1 });
     res.json({ success: true, teachers });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    const duplicateMessage = getDuplicateKeyMessage(err);
+    res.status(duplicateMessage ? 409 : 500).json({ success: false, message: duplicateMessage || getErrorMessage(err) });
   }
 };
 
 export const updateTeacher = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { name, username, password, isActive } = req.body;
+    const { password, isActive } = req.body;
+    const name = req.body.name !== undefined ? normalizeName(req.body.name) : undefined;
+    const username = req.body.username !== undefined ? normalizeUsername(req.body.username) : undefined;
     const teacher = await User.findOne({ _id: id, role: 'teacher' }).select('+password');
 
     if (!teacher) {
@@ -59,10 +84,35 @@ export const updateTeacher = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    if (name) teacher.name = name;
-    if (username) teacher.username = username.toLowerCase();
+    if (name !== undefined) {
+      if (!name) {
+        res.status(400).json({ success: false, message: 'Name is required' });
+        return;
+      }
+      teacher.name = name;
+    }
+    if (username && username !== teacher.username) {
+      const usernameError = validateUsername(username);
+      if (usernameError) {
+        res.status(400).json({ success: false, message: usernameError });
+        return;
+      }
+      const existingUser = await User.findOne({ username, _id: { $ne: id } });
+      if (existingUser) {
+        res.status(409).json({ success: false, message: 'Username already taken' });
+        return;
+      }
+      teacher.username = username;
+    }
     if (isActive !== undefined) teacher.isActive = isActive;
-    if (password) teacher.password = password;
+    if (password) {
+      const passwordError = validatePassword(String(password));
+      if (passwordError) {
+        res.status(400).json({ success: false, message: passwordError });
+        return;
+      }
+      teacher.password = String(password);
+    }
     await teacher.save();
 
     res.json({
@@ -76,7 +126,8 @@ export const updateTeacher = async (req: AuthRequest, res: Response): Promise<vo
       },
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    const duplicateMessage = getDuplicateKeyMessage(err);
+    res.status(duplicateMessage ? 409 : 500).json({ success: false, message: duplicateMessage || getErrorMessage(err) });
   }
 };
 
@@ -90,7 +141,7 @@ export const deleteTeacher = async (req: AuthRequest, res: Response): Promise<vo
 
     res.json({ success: true, message: 'Teacher deleted' });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    res.status(500).json({ success: false, message: getErrorMessage(err) });
   }
 };
 
@@ -105,6 +156,6 @@ export const getSuperAdminStats = async (_req: AuthRequest, res: Response): Prom
 
     res.json({ success: true, stats: { totalTeachers, activeTeachers, totalStudents, totalAdmins } });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    res.status(500).json({ success: false, message: getErrorMessage(err) });
   }
 };

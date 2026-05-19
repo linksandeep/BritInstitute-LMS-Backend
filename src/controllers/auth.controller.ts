@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User.model';
 import { config } from '../config/env';
+import { getErrorMessage, normalizeUsername } from '../utils/validation';
 
 const signToken = (id: string, role: string, username: string): string => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -12,14 +13,15 @@ const signToken = (id: string, role: string, username: string): string => {
 
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { username, password } = req.body;
+    const username = normalizeUsername(req.body.username);
+    const password = String(req.body.password || '');
 
     if (!username || !password) {
       res.status(400).json({ success: false, message: 'Username and password are required' });
       return;
     }
 
-    const user = await User.findOne({ username: username.toLowerCase() }).select('+password');
+    const user = await User.findOne({ username }).select('+password');
     if (!user || !user.isActive) {
       res.status(401).json({ success: false, message: 'Invalid credentials' });
       return;
@@ -45,7 +47,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       },
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    res.status(500).json({ success: false, message: getErrorMessage(err) });
   }
 };
 
@@ -58,6 +60,6 @@ export const getMe = async (req: Request & { user?: { id: string } }, res: Respo
     }
     res.json({ success: true, user });
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error', error: err });
+    res.status(500).json({ success: false, message: getErrorMessage(err) });
   }
 };

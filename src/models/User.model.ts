@@ -22,7 +22,7 @@ const userSchema = new Schema<IUser>(
     password: { type: String, required: true, select: false },
     role: { type: String, enum: ['superadmin', 'admin', 'teacher', 'student'], default: 'student' },
     phone: { type: String, trim: true, default: '' },
-    email: { type: String, trim: true, lowercase: true, default: '' },
+    email: { type: String, trim: true, lowercase: true },
     enrolledCourse: { type: Schema.Types.ObjectId, ref: 'Course' },
     isActive: { type: Boolean, default: true },
   },

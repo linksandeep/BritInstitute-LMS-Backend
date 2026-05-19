@@ -4,6 +4,7 @@ import { adminOnly } from '../middleware/admin.middleware';
 import {
   createUser, getUsers, updateUser, deleteUser,
   createCourse, getCourses, updateCourse, deleteCourse,
+  getTeachersForCourseAccess,
   getStats,
 } from '../controllers/admin.controller';
 
@@ -20,6 +21,7 @@ router.post('/users', createUser);
 router.get('/users', getUsers);
 router.put('/users/:id', updateUser);
 router.delete('/users/:id', deleteUser);
+router.get('/teachers', getTeachersForCourseAccess);
 
 // Courses
 router.post('/courses', createCourse);

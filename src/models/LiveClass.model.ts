@@ -7,6 +7,8 @@ export interface ILiveClass extends Document {
   classNumber: string;
   topic: string;
   meetingLink: string;
+  zoomMeetingId?: string;
+  zoomStartUrl?: string;
   scheduledAt: Date;
   duration: number; // minutes
   status: LiveClassStatus;
@@ -21,6 +23,8 @@ const liveClassSchema = new Schema<ILiveClass>(
     classNumber: { type: String, required: true, trim: true },
     topic: { type: String, required: true, trim: true },
     meetingLink: { type: String, required: true },
+    zoomMeetingId: { type: String, trim: true },
+    zoomStartUrl: { type: String },
     scheduledAt: { type: Date, required: true },
     duration: { type: Number, required: true, default: 60 },
     status: { type: String, enum: ['scheduled', 'live', 'ended'], default: 'scheduled' },

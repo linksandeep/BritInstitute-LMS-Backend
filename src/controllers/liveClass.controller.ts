@@ -2,18 +2,39 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { LiveClass } from '../models/LiveClass.model';
 import { Attendance } from '../models/Attendance.model';
-import { User } from '../models/User.model';
 import { Batch } from '../models/Batch.model';
+import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting } from '../services/zoom.service';
 
 export const createLiveClass = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { batch, classNumber, topic, meetingLink, scheduledAt, duration } = req.body;
-    if (!batch || !classNumber || !topic || !meetingLink || !scheduledAt) {
+    const { batch, classNumber, topic, scheduledAt, duration } = req.body;
+    if (!batch || !classNumber || !topic || !scheduledAt) {
       res.status(400).json({ success: false, message: 'All fields are required' });
       return;
     }
+
+    const startTime = new Date(scheduledAt);
+    if (Number.isNaN(startTime.getTime())) {
+      res.status(400).json({ success: false, message: 'Invalid scheduled date' });
+      return;
+    }
+
+    const meetingDuration = Number(duration) || 60;
+    const zoomMeeting = await createZoomMeeting({
+      topic: `${classNumber} - ${topic}`,
+      startTime,
+      duration: meetingDuration,
+    });
+
     const liveClass = await LiveClass.create({
-      batch, classNumber, topic, meetingLink, scheduledAt, duration: duration || 60,
+      batch,
+      classNumber,
+      topic,
+      meetingLink: zoomMeeting.join_url,
+      zoomMeetingId: String(zoomMeeting.id),
+      zoomStartUrl: zoomMeeting.start_url,
+      scheduledAt: startTime,
+      duration: meetingDuration,
       createdBy: req.user!.id, status: 'scheduled',
     });
     res.status(201).json({ success: true, liveClass });
@@ -44,8 +65,10 @@ export const getStudentLiveClasses = async (req: AuthRequest, res: Response): Pr
     const enriched = await Promise.all(
       liveClasses.map(async (cls) => {
         const att = await Attendance.findOne({ liveClass: cls._id, student: req.user!.id });
+        const liveClass = cls.toObject();
+        delete liveClass.zoomStartUrl;
         return {
-          ...cls.toObject(),
+          ...liveClass,
           attendance: att ? att.status : null,
         };
       })
@@ -67,7 +90,45 @@ export const getAllLiveClasses = async (_req: AuthRequest, res: Response): Promi
 
 export const updateLiveClass = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const cls = await LiveClass.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const existing = await LiveClass.findById(req.params.id);
+    if (!existing) {
+      res.status(404).json({ success: false, message: 'Live class not found' });
+      return;
+    }
+
+    const allowedUpdates: Partial<{
+      batch: string;
+      classNumber: string;
+      topic: string;
+      scheduledAt: Date;
+      duration: number;
+      meetingLink: string;
+    }> = {};
+
+    if (req.body.batch !== undefined) allowedUpdates.batch = req.body.batch;
+    if (req.body.classNumber !== undefined) allowedUpdates.classNumber = req.body.classNumber;
+    if (req.body.topic !== undefined) allowedUpdates.topic = req.body.topic;
+    if (req.body.scheduledAt !== undefined) {
+      const startTime = new Date(req.body.scheduledAt);
+      if (Number.isNaN(startTime.getTime())) {
+        res.status(400).json({ success: false, message: 'Invalid scheduled date' });
+        return;
+      }
+      allowedUpdates.scheduledAt = startTime;
+    }
+    if (req.body.duration !== undefined) allowedUpdates.duration = Number(req.body.duration) || existing.duration;
+
+    if (existing.zoomMeetingId) {
+      await updateZoomMeeting(existing.zoomMeetingId, {
+        topic: `${allowedUpdates.classNumber || existing.classNumber} - ${allowedUpdates.topic || existing.topic}`,
+        startTime: allowedUpdates.scheduledAt || existing.scheduledAt,
+        duration: allowedUpdates.duration || existing.duration,
+      });
+    } else if (req.body.meetingLink !== undefined) {
+      allowedUpdates.meetingLink = req.body.meetingLink;
+    }
+
+    const cls = await LiveClass.findByIdAndUpdate(req.params.id, allowedUpdates, { new: true });
     if (!cls) {
       res.status(404).json({ success: false, message: 'Live class not found' });
       return;
@@ -80,11 +141,17 @@ export const updateLiveClass = async (req: AuthRequest, res: Response): Promise<
 
 export const deleteLiveClass = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const cls = await LiveClass.findByIdAndDelete(req.params.id);
+    const cls = await LiveClass.findById(req.params.id);
     if (!cls) {
       res.status(404).json({ success: false, message: 'Live class not found' });
       return;
     }
+
+    if (cls.zoomMeetingId) {
+      await deleteZoomMeeting(cls.zoomMeetingId);
+    }
+
+    await cls.deleteOne();
     res.json({ success: true, message: 'Live class deleted' });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error', error: err });
@@ -108,18 +175,19 @@ export const markAttend = async (req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
-    // Check if within 30 minutes of scheduled time
+    // Allow students to join from 30 minutes before start until the scheduled class duration ends.
     const now = new Date();
     const scheduledAt = new Date(cls.scheduledAt);
-    const diffMinutes = (now.getTime() - scheduledAt.getTime()) / (1000 * 60);
+    const joinOpensAt = new Date(scheduledAt.getTime() - 30 * 60 * 1000);
+    const classEndsAt = new Date(scheduledAt.getTime() + cls.duration * 60 * 1000);
 
-    if (diffMinutes < -30) {
+    if (now < joinOpensAt) {
        res.status(400).json({ success: false, message: 'Class has not started yet' });
        return;
     }
 
-    if (diffMinutes > 30) {
-       res.status(400).json({ success: false, message: 'Attendance window closed (30 min limit)' });
+    if (now > classEndsAt) {
+       res.status(400).json({ success: false, message: 'This class has already finished' });
        return;
     }
 
