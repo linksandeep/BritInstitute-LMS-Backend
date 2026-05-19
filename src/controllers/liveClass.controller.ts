@@ -14,6 +14,11 @@ const sendLiveClassError = (res: Response, err: unknown, fallback: string): void
   res.status(500).json({ success: false, message: fallback });
 };
 
+const getErrorMessage = (err: unknown, fallback: string): string => {
+  if (err instanceof Error) return err.message;
+  return fallback;
+};
+
 export const createLiveClass = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { batch, classNumber, topic, scheduledAt, duration } = req.body;
@@ -156,12 +161,22 @@ export const deleteLiveClass = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
+    let warning: string | undefined;
     if (cls.zoomMeetingId) {
-      await deleteZoomMeeting(cls.zoomMeetingId);
+      try {
+        await deleteZoomMeeting(cls.zoomMeetingId);
+      } catch (err) {
+        warning = getErrorMessage(err, 'The Zoom meeting could not be deleted.');
+        console.warn(`Zoom cleanup failed for live class ${cls._id}: ${warning}`);
+      }
     }
 
     await cls.deleteOne();
-    res.json({ success: true, message: 'Live class deleted' });
+    res.json({
+      success: true,
+      message: warning ? 'Live class deleted from LMS. Zoom cleanup needs attention.' : 'Live class deleted',
+      warning,
+    });
   } catch (err) {
     sendLiveClassError(res, err, 'Unable to delete live class. Please try again.');
   }

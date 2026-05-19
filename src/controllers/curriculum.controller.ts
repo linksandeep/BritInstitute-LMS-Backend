@@ -16,6 +16,11 @@ const getControllerErrorMessage = (error: unknown, fallback: string) => {
 
 const getControllerErrorStatus = (error: unknown) => (error instanceof ZoomApiError ? 502 : 500);
 
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error) return error.message;
+  return fallback;
+};
+
 const stripIds = (modules: any[]) =>
   modules.map((module) => ({
     title: module.title,
@@ -51,7 +56,12 @@ const deleteLinkedLiveClasses = async (ids: string[]) => {
   const liveClasses = await LiveClass.find({ _id: { $in: ids } });
   for (const liveClass of liveClasses) {
     if (liveClass.zoomMeetingId) {
-      await deleteZoomMeeting(liveClass.zoomMeetingId);
+      try {
+        await deleteZoomMeeting(liveClass.zoomMeetingId);
+      } catch (error) {
+        const message = getErrorMessage(error, 'The Zoom meeting could not be deleted.');
+        console.warn(`Zoom cleanup failed for curriculum live class ${liveClass._id}: ${message}`);
+      }
     }
   }
 

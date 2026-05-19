@@ -47,7 +47,10 @@ const getZoomErrorMessage = async (response: Response, fallback: string): Promis
 
 const ensureZoomConfig = (): void => {
   if (!config.zoom.accountId || !config.zoom.clientId || !config.zoom.clientSecret) {
-    throw new Error('Zoom API credentials are not configured');
+    throw new ZoomApiError(
+      'Zoom API credentials are not configured on the backend server. Add ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, and ZOOM_CLIENT_SECRET in production.',
+      500
+    );
   }
 };
 
