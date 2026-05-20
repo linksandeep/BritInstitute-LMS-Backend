@@ -48,6 +48,15 @@ const canAccessLecture = async (lecture: { batch: unknown }, user: RequestUser):
   return Boolean(batch);
 };
 
+const toClientLecture = (lecture: { toObject: () => any }) => {
+  const data = lecture.toObject();
+  const isZoomRecording = data.recordingSource === 'zoom' || data.videoType === 'zoom';
+  return {
+    ...data,
+    isPlayable: !isZoomRecording || (data.recordingStatus === 'available' && Boolean(data.zoomDownloadUrl)),
+  };
+};
+
 export const createRecordedLecture = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { batch, title, description, videoUrl, videoType, order } = req.body;
@@ -70,7 +79,7 @@ export const createRecordedLecture = async (req: AuthRequest, res: Response): Pr
 export const getLecturesByBatch = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const lectures = await RecordedLecture.find({ batch: req.params.batchId }).sort({ order: 1, createdAt: -1 });
-    res.json({ success: true, lectures });
+    res.json({ success: true, lectures: lectures.map(toClientLecture) });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error', error: err });
   }
@@ -87,14 +96,31 @@ export const getStudentLectures = async (req: AuthRequest, res: Response): Promi
         { liveClass: null },
         { recordingSource: 'manual' },
         { recordingStatus: 'available' },
+        { recordingSource: 'zoom', recordingStatus: 'pending' },
       ],
-    }).sort({ order: 1, createdAt: -1 });
+    })
+      .populate('liveClass', 'status scheduledAt duration')
+      .sort({ order: 1, createdAt: -1 });
+
+    const now = Date.now();
+    const visibleLectures = lectures.filter((lecture) => {
+      if (lecture.recordingSource !== 'zoom' || lecture.recordingStatus === 'available') return true;
+
+      const liveClass = lecture.liveClass as unknown as { status?: string; scheduledAt?: Date; duration?: number } | null;
+      if (!liveClass) return false;
+
+      const scheduledAt = liveClass.scheduledAt ? new Date(liveClass.scheduledAt).getTime() : 0;
+      const duration = Number(liveClass.duration) || 0;
+      const endedByTime = scheduledAt > 0 && scheduledAt + duration * 60 * 1000 < now;
+
+      return liveClass.status === 'ended' || endedByTime;
+    });
 
     const enriched = await Promise.all(
-      lectures.map(async (lec) => {
+      visibleLectures.map(async (lec) => {
         const prog = await LectureProgress.findOne({ lecture: lec._id, student: req.user!.id });
         return {
-          ...lec.toObject(),
+          ...toClientLecture(lec),
           isCompleted: prog ? prog.isCompleted : false,
           watchDuration: prog ? prog.watchDuration : 0,
         };
@@ -147,7 +173,7 @@ export const updateProgress = async (req: AuthRequest, res: Response): Promise<v
 export const getAllLectures = async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
     const lectures = await RecordedLecture.find().populate('batch', 'name').sort({ createdAt: -1 });
-    res.json({ success: true, lectures });
+    res.json({ success: true, lectures: lectures.map(toClientLecture) });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error', error: err });
   }
@@ -194,17 +220,21 @@ export const streamLecture = async (req: AuthRequest, res: Response): Promise<vo
       }
 
       if (!lecture.zoomDownloadUrl) {
-        res.status(404).json({ success: false, message: 'Zoom recording file is not available yet' });
+        res.status(409).json({ success: false, message: 'Zoom recording is still processing' });
         return;
       }
 
       const zoomResponse = await fetchZoomRecordingFile(lecture.zoomDownloadUrl, req.headers.range);
       res.status(zoomResponse.status);
 
-      for (const header of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+      for (const header of ['content-length', 'content-range', 'accept-ranges']) {
         const value = zoomResponse.headers.get(header);
         if (value) res.setHeader(header, value);
       }
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
       if (!zoomResponse.body) {
         res.status(502).json({ success: false, message: 'Zoom recording stream is empty' });

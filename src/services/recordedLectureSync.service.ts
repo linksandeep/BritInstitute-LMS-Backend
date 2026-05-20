@@ -25,7 +25,7 @@ const pickBestRecordingFile = (recording: ZoomRecordingsResponse): ZoomRecording
     .filter((file) => {
       const status = String(file.status || 'completed').toLowerCase();
       const extension = String(file.file_extension || file.file_type || '').toLowerCase();
-      return status === 'completed' && extension === 'mp4' && Boolean(file.download_url || file.play_url);
+      return status === 'completed' && extension === 'mp4' && Boolean(file.download_url);
     })
     .sort((a, b) => recordingPriority(a) - recordingPriority(b));
 
@@ -36,7 +36,7 @@ export const syncRecordedLectureForLiveClass = async (liveClass: ILiveClass): Pr
   const title = `${liveClass.classNumber} - ${liveClass.topic}`;
   const existing = await RecordedLecture.findOne({ liveClass: liveClass._id });
 
-  if (existing?.recordingSource === 'zoom' && existing.recordingStatus === 'available') {
+  if (existing?.recordingSource === 'zoom' && existing.recordingStatus === 'available' && existing.zoomDownloadUrl) {
     existing.batch = liveClass.batch;
     existing.title = title;
     existing.order = new Date(liveClass.scheduledAt).getTime();
@@ -67,11 +67,56 @@ export const syncZoomRecordingForLiveClass = async (
   liveClass: ILiveClass,
   recordingPayload?: ZoomRecordingsResponse
 ): Promise<boolean> => {
-  const recording = recordingPayload || await getZoomMeetingRecordings(liveClass.zoomMeetingId || '');
+  const identifiers = [
+    liveClass.zoomMeetingUuid,
+    liveClass.zoomMeetingId,
+  ].filter((identifier): identifier is string => Boolean(identifier));
+
+  let recording = recordingPayload;
+  let lastError: unknown;
+
+  if (!recording) {
+    for (const identifier of identifiers) {
+      try {
+        recording = await getZoomMeetingRecordings(identifier);
+        break;
+      } catch (err) {
+        lastError = err;
+        if (err instanceof ZoomApiError && err.status === 404) continue;
+        throw err;
+      }
+    }
+  }
+
+  if (!recording) {
+    if (lastError) throw lastError;
+    await syncRecordedLectureForLiveClass(liveClass);
+    return false;
+  }
+
   const bestFile = pickBestRecordingFile(recording);
 
   if (!bestFile) {
-    await syncRecordedLectureForLiveClass(liveClass);
+    await RecordedLecture.findOneAndUpdate(
+      { liveClass: liveClass._id },
+      {
+        batch: liveClass.batch,
+        liveClass: liveClass._id,
+        title: `${liveClass.classNumber} - ${liveClass.topic}`,
+        description: 'Zoom recording is still processing. The video will appear automatically when Zoom provides the MP4 file.',
+        videoUrl: recording.share_url || liveClass.meetingLink,
+        videoType: 'zoom',
+        recordingSource: 'zoom',
+        recordingStatus: 'pending',
+        zoomRecordingMeetingId: String(recording.id || liveClass.zoomMeetingId || ''),
+        zoomShareUrl: recording.share_url,
+        zoomDownloadUrl: undefined,
+        zoomPlayUrl: undefined,
+        order: new Date(liveClass.scheduledAt).getTime(),
+        uploadedBy: liveClass.createdBy,
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
     return false;
   }
 
@@ -83,7 +128,7 @@ export const syncZoomRecordingForLiveClass = async (
       liveClass: liveClass._id,
       title,
       description: 'Zoom cloud recording imported automatically for this scheduled live class.',
-      videoUrl: bestFile.play_url || bestFile.download_url || recording.share_url || liveClass.meetingLink,
+      videoUrl: bestFile.download_url || recording.share_url || liveClass.meetingLink,
       videoType: 'zoom',
       recordingSource: 'zoom',
       recordingStatus: 'available',
@@ -109,6 +154,8 @@ export const syncPendingZoomRecordings = async (): Promise<{ checked: number; im
     $or: [
       { recordingSource: 'zoom', recordingStatus: 'pending' },
       { recordingStatus: { $exists: false } },
+      { recordingSource: 'zoom', recordingStatus: 'available', zoomDownloadUrl: { $exists: false } },
+      { recordingSource: 'zoom', recordingStatus: 'available', zoomDownloadUrl: '' },
     ],
   }).select('liveClass');
   const liveClassIds = pendingLectures.map((lecture) => lecture.liveClass).filter(Boolean);

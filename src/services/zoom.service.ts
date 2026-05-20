@@ -115,6 +115,11 @@ const getAuthorizedZoomHeaders = async (extraHeaders?: Record<string, string>): 
   };
 };
 
+const encodeZoomMeetingIdentifier = (meetingId: string): string => {
+  const encoded = encodeURIComponent(meetingId);
+  return /[/?#]/.test(meetingId) ? encodeURIComponent(encoded) : encoded;
+};
+
 export const createZoomMeeting = async ({ topic, startTime, duration }: ZoomMeetingInput): Promise<ZoomMeetingResponse> => {
   const response = await fetch('https://api.zoom.us/v2/users/me/meetings', {
     method: 'POST',
@@ -189,7 +194,7 @@ export const deleteZoomMeeting = async (meetingId: string): Promise<void> => {
 };
 
 export const getZoomMeetingRecordings = async (meetingId: string): Promise<ZoomRecordingsResponse> => {
-  const response = await fetch(`https://api.zoom.us/v2/meetings/${encodeURIComponent(meetingId)}/recordings`, {
+  const response = await fetch(`https://api.zoom.us/v2/meetings/${encodeZoomMeetingIdentifier(meetingId)}/recordings`, {
     method: 'GET',
     headers: await getAuthorizedZoomHeaders(),
   });
