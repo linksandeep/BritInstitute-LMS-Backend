@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { LiveClass } from '../models/LiveClass.model';
 import { autoMarkAbsent } from '../controllers/liveClass.controller';
+import { syncPendingZoomRecordings } from '../services/recordedLectureSync.service';
 
 export const startAttendanceJob = (): void => {
   // Run every 5 minutes
@@ -16,6 +17,11 @@ export const startAttendanceJob = (): void => {
         if (now > endTime) {
           await autoMarkAbsent(String(cls._id));
         }
+      }
+
+      const zoomSync = await syncPendingZoomRecordings();
+      if (zoomSync.checked > 0) {
+        console.log(`🎬 Zoom recording sync checked ${zoomSync.checked}, imported ${zoomSync.imported}`);
       }
     } catch (err) {
       console.error('❌ Attendance cron error:', err);

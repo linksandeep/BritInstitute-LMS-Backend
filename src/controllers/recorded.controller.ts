@@ -1,8 +1,52 @@
 import { Response } from 'express';
+import jwt from 'jsonwebtoken';
+import { Readable } from 'stream';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { RecordedLecture } from '../models/RecordedLecture.model';
 import { LectureProgress } from '../models/LectureProgress.model';
 import { Batch } from '../models/Batch.model';
+import { User } from '../models/User.model';
+import { config } from '../config/env';
+import { fetchZoomRecordingFile, ZoomApiError } from '../services/zoom.service';
+import { syncPendingZoomRecordings } from '../services/recordedLectureSync.service';
+
+type RequestUser = NonNullable<AuthRequest['user']>;
+
+const staffRoles = ['teacher', 'admin', 'superadmin'];
+
+const getBearerToken = (req: AuthRequest): string | null => {
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) return authHeader.split(' ')[1];
+  return typeof req.query.token === 'string' ? req.query.token : null;
+};
+
+const resolveRequestUser = async (req: AuthRequest): Promise<RequestUser | null> => {
+  if (req.user) return req.user;
+
+  const token = getBearerToken(req);
+  if (!token) return null;
+
+  try {
+    const decoded = jwt.verify(token, config.jwtSecret) as RequestUser;
+    const user = await User.findById(decoded.id);
+    if (!user || !user.isActive) return null;
+    return { id: decoded.id, role: decoded.role, username: decoded.username };
+  } catch {
+    return null;
+  }
+};
+
+const canAccessLecture = async (lecture: { batch: unknown }, user: RequestUser): Promise<boolean> => {
+  if (staffRoles.includes(user.role)) return true;
+
+  const batch = await Batch.exists({
+    _id: lecture.batch,
+    students: user.id,
+    isActive: true,
+  });
+
+  return Boolean(batch);
+};
 
 export const createRecordedLecture = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -13,6 +57,8 @@ export const createRecordedLecture = async (req: AuthRequest, res: Response): Pr
     }
     const lecture = await RecordedLecture.create({
       batch, title, description: description || '', videoUrl, videoType: videoType || 'other',
+      recordingSource: 'manual',
+      recordingStatus: 'available',
       order: order || 0, uploadedBy: req.user!.id,
     });
     res.status(201).json({ success: true, lecture });
@@ -34,7 +80,15 @@ export const getStudentLectures = async (req: AuthRequest, res: Response): Promi
   try {
     const batches = await Batch.find({ students: req.user!.id, isActive: true });
     const batchIds = batches.map(b => b._id);
-    const lectures = await RecordedLecture.find({ batch: { $in: batchIds } }).sort({ order: 1, createdAt: -1 });
+    const lectures = await RecordedLecture.find({
+      batch: { $in: batchIds },
+      $or: [
+        { liveClass: { $exists: false } },
+        { liveClass: null },
+        { recordingSource: 'manual' },
+        { recordingStatus: 'available' },
+      ],
+    }).sort({ order: 1, createdAt: -1 });
 
     const enriched = await Promise.all(
       lectures.map(async (lec) => {
@@ -64,6 +118,12 @@ export const updateProgress = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
+    const hasAccess = await canAccessLecture(lecture, req.user!);
+    if (!hasAccess) {
+      res.status(403).json({ success: false, message: 'You do not have access to this recorded lecture' });
+      return;
+    }
+
     const prog = await LectureProgress.findOneAndUpdate(
       { lecture: id, student },
       { 
@@ -90,6 +150,75 @@ export const getAllLectures = async (_req: AuthRequest, res: Response): Promise<
     res.json({ success: true, lectures });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error', error: err });
+  }
+};
+
+export const syncZoomRecordings = async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const result = await syncPendingZoomRecordings();
+    res.json({
+      success: true,
+      message: `Checked ${result.checked} Zoom class${result.checked === 1 ? '' : 'es'} and imported ${result.imported} recording${result.imported === 1 ? '' : 's'}.`,
+      ...result,
+    });
+  } catch (err) {
+    const message = err instanceof ZoomApiError ? err.message : 'Unable to sync Zoom recordings';
+    res.status(err instanceof ZoomApiError ? 502 : 500).json({ success: false, message });
+  }
+};
+
+export const streamLecture = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const user = await resolveRequestUser(req);
+    if (!user) {
+      res.status(401).json({ success: false, message: 'Not authorized' });
+      return;
+    }
+
+    const lecture = await RecordedLecture.findById(req.params.id);
+    if (!lecture) {
+      res.status(404).json({ success: false, message: 'Lecture not found' });
+      return;
+    }
+
+    const hasAccess = await canAccessLecture(lecture, user);
+    if (!hasAccess) {
+      res.status(403).json({ success: false, message: 'You do not have access to this recorded lecture' });
+      return;
+    }
+
+    if (lecture.recordingSource === 'zoom') {
+      if (lecture.recordingStatus !== 'available') {
+        res.status(409).json({ success: false, message: 'Zoom recording is still processing' });
+        return;
+      }
+
+      if (!lecture.zoomDownloadUrl) {
+        res.status(404).json({ success: false, message: 'Zoom recording file is not available yet' });
+        return;
+      }
+
+      const zoomResponse = await fetchZoomRecordingFile(lecture.zoomDownloadUrl, req.headers.range);
+      res.status(zoomResponse.status);
+
+      for (const header of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+        const value = zoomResponse.headers.get(header);
+        if (value) res.setHeader(header, value);
+      }
+
+      if (!zoomResponse.body) {
+        res.status(502).json({ success: false, message: 'Zoom recording stream is empty' });
+        return;
+      }
+
+      Readable.fromWeb(zoomResponse.body as never).pipe(res);
+      return;
+    }
+
+    res.redirect(lecture.videoUrl);
+  } catch (err) {
+    const message = err instanceof ZoomApiError ? err.message : 'Unable to stream recorded lecture';
+    res.status(err instanceof ZoomApiError ? 502 : 500).json({ success: false, message });
   }
 };
 

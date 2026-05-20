@@ -8,18 +8,22 @@ import {
   getStudentLectures, 
   updateLecture, 
   deleteLecture,
-  updateProgress
+  updateProgress,
+  streamLecture,
+  syncZoomRecordings
 } from '../controllers/recorded.controller';
 
 const router = Router();
 
 // Student routes
 router.get('/me', protect, getStudentLectures);
+router.get('/:id/stream', streamLecture);
 router.post('/:id/progress', protect, updateProgress);
 
 // Admin routes
 router.get('/', protect, adminOnly, getAllLectures);
 router.get('/batch/:batchId', protect, adminOnly, getLecturesByBatch);
+router.post('/sync-zoom', protect, adminOnly, syncZoomRecordings);
 router.post('/', protect, adminOnly, createRecordedLecture);
 router.put('/:id', protect, adminOnly, updateLecture);
 router.delete('/:id', protect, adminOnly, deleteLecture);

@@ -13,6 +13,7 @@ import batchRoutes from './routes/batch.routes';
 import bookingRoutes from './routes/booking.routes';
 import curriculumRoutes from './routes/curriculum.routes';
 import superAdminRoutes from './routes/superadmin.routes';
+import zoomWebhookRoutes from './routes/zoomWebhook.routes';
 import { startAttendanceJob } from './jobs/attendance.job';
 
 const app: Application = express();
@@ -23,6 +24,7 @@ app.use(cors({
   origin: config.frontendUrl,
   credentials: true,
 }));
+app.use('/api/zoom/webhook', express.raw({ type: 'application/json' }), zoomWebhookRoutes);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 if (config.nodeEnv === 'development') {

@@ -8,6 +8,7 @@ export interface ILiveClass extends Document {
   topic: string;
   meetingLink: string;
   zoomMeetingId?: string;
+  zoomMeetingUuid?: string;
   zoomStartUrl?: string;
   scheduledAt: Date;
   duration: number; // minutes
@@ -24,6 +25,7 @@ const liveClassSchema = new Schema<ILiveClass>(
     topic: { type: String, required: true, trim: true },
     meetingLink: { type: String, required: true },
     zoomMeetingId: { type: String, trim: true },
+    zoomMeetingUuid: { type: String, trim: true },
     zoomStartUrl: { type: String },
     scheduledAt: { type: Date, required: true },
     duration: { type: Number, required: true, default: 60 },

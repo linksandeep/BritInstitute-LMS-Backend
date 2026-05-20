@@ -132,6 +132,7 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
         const existingLiveClass = topic.liveClassId ? await LiveClass.findById(topic.liveClassId) : null;
         let meetingLink = existingLiveClass?.meetingLink || String(topic.meetingLink || '').trim();
         let zoomMeetingId = existingLiveClass?.zoomMeetingId;
+        let zoomMeetingUuid = existingLiveClass?.zoomMeetingUuid;
         let zoomStartUrl = existingLiveClass?.zoomStartUrl;
 
         if (existingLiveClass?.zoomMeetingId) {
@@ -148,6 +149,7 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
           });
           meetingLink = zoomMeeting.join_url;
           zoomMeetingId = String(zoomMeeting.id);
+          zoomMeetingUuid = zoomMeeting.uuid;
           zoomStartUrl = zoomMeeting.start_url;
         }
 
@@ -157,6 +159,7 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
           topic: title,
           meetingLink,
           zoomMeetingId,
+          zoomMeetingUuid,
           zoomStartUrl,
           scheduledAt,
           duration,

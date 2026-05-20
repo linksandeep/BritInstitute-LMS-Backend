@@ -47,6 +47,7 @@ export const createLiveClass = async (req: AuthRequest, res: Response): Promise<
       topic,
       meetingLink: zoomMeeting.join_url,
       zoomMeetingId: String(zoomMeeting.id),
+      zoomMeetingUuid: zoomMeeting.uuid,
       zoomStartUrl: zoomMeeting.start_url,
       scheduledAt: startTime,
       duration: meetingDuration,

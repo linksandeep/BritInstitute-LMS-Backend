@@ -8,8 +8,31 @@ interface ZoomTokenResponse {
 
 interface ZoomMeetingResponse {
   id: number;
+  uuid?: string;
   join_url: string;
   start_url: string;
+}
+
+export interface ZoomRecordingFile {
+  id?: string;
+  file_type?: string;
+  file_extension?: string;
+  file_size?: number;
+  play_url?: string;
+  download_url?: string;
+  status?: string;
+  recording_type?: string;
+  recording_start?: string;
+  recording_end?: string;
+}
+
+export interface ZoomRecordingsResponse {
+  id?: number | string;
+  uuid?: string;
+  topic?: string;
+  share_url?: string;
+  password?: string;
+  recording_files?: ZoomRecordingFile[];
 }
 
 interface ZoomMeetingInput {
@@ -84,12 +107,19 @@ const getAccessToken = async (): Promise<string> => {
   return cachedToken.token;
 };
 
-export const createZoomMeeting = async ({ topic, startTime, duration }: ZoomMeetingInput): Promise<ZoomMeetingResponse> => {
+const getAuthorizedZoomHeaders = async (extraHeaders?: Record<string, string>): Promise<Record<string, string>> => {
   const token = await getAccessToken();
+  return {
+    Authorization: `Bearer ${token}`,
+    ...(extraHeaders || {}),
+  };
+};
+
+export const createZoomMeeting = async ({ topic, startTime, duration }: ZoomMeetingInput): Promise<ZoomMeetingResponse> => {
   const response = await fetch('https://api.zoom.us/v2/users/me/meetings', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...(await getAuthorizedZoomHeaders()),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -104,7 +134,7 @@ export const createZoomMeeting = async ({ topic, startTime, duration }: ZoomMeet
         approval_type: 2,
         registration_type: 1,
         audio: 'both',
-        auto_recording: 'none',
+        auto_recording: 'cloud',
       },
     }),
   });
@@ -121,11 +151,10 @@ export const updateZoomMeeting = async (
   meetingId: string,
   { topic, startTime, duration }: ZoomMeetingInput
 ): Promise<void> => {
-  const token = await getAccessToken();
   const response = await fetch(`https://api.zoom.us/v2/meetings/${meetingId}`, {
     method: 'PATCH',
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...(await getAuthorizedZoomHeaders()),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -133,6 +162,9 @@ export const updateZoomMeeting = async (
       start_time: startTime.toISOString(),
       duration,
       timezone: 'Asia/Kolkata',
+      settings: {
+        auto_recording: 'cloud',
+      },
     }),
   });
 
@@ -143,11 +175,10 @@ export const updateZoomMeeting = async (
 };
 
 export const deleteZoomMeeting = async (meetingId: string): Promise<void> => {
-  const token = await getAccessToken();
   const response = await fetch(`https://api.zoom.us/v2/meetings/${meetingId}`, {
     method: 'DELETE',
     headers: {
-      Authorization: `Bearer ${token}`,
+      ...(await getAuthorizedZoomHeaders()),
     },
   });
 
@@ -155,4 +186,30 @@ export const deleteZoomMeeting = async (meetingId: string): Promise<void> => {
     const message = await getZoomErrorMessage(response, 'Unable to delete Zoom meeting.');
     throw new ZoomApiError(message, response.status);
   }
+};
+
+export const getZoomMeetingRecordings = async (meetingId: string): Promise<ZoomRecordingsResponse> => {
+  const response = await fetch(`https://api.zoom.us/v2/meetings/${encodeURIComponent(meetingId)}/recordings`, {
+    method: 'GET',
+    headers: await getAuthorizedZoomHeaders(),
+  });
+
+  if (!response.ok) {
+    const message = await getZoomErrorMessage(response, 'Unable to fetch Zoom meeting recordings.');
+    throw new ZoomApiError(message, response.status);
+  }
+
+  return (await response.json()) as ZoomRecordingsResponse;
+};
+
+export const fetchZoomRecordingFile = async (downloadUrl: string, range?: string): Promise<Response> => {
+  const headers = await getAuthorizedZoomHeaders(range ? { Range: range } : undefined);
+  const response = await fetch(downloadUrl, { headers });
+
+  if (!response.ok && response.status !== 206) {
+    const message = await getZoomErrorMessage(response, 'Unable to stream Zoom recording.');
+    throw new ZoomApiError(message, response.status);
+  }
+
+  return response;
 };

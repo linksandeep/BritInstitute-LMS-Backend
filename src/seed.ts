@@ -506,6 +506,7 @@ async function seed() {
 
     let meetingLink = liveClass?.meetingLink || '';
     let zoomMeetingId = liveClass?.zoomMeetingId;
+    let zoomMeetingUuid = liveClass?.zoomMeetingUuid;
     let zoomStartUrl = liveClass?.zoomStartUrl;
 
     if (zoomMeetingId) {
@@ -522,6 +523,7 @@ async function seed() {
       });
       meetingLink = zoomMeeting.join_url;
       zoomMeetingId = String(zoomMeeting.id);
+      zoomMeetingUuid = zoomMeeting.uuid;
       zoomStartUrl = zoomMeeting.start_url;
     }
 
@@ -532,6 +534,7 @@ async function seed() {
         topic: meeting.topic,
         meetingLink,
         zoomMeetingId,
+        zoomMeetingUuid,
         zoomStartUrl,
         scheduledAt: meeting.scheduledAt,
         duration: meeting.duration,
@@ -542,6 +545,7 @@ async function seed() {
     } else {
       liveClass.meetingLink = meetingLink;
       liveClass.zoomMeetingId = zoomMeetingId;
+      liveClass.zoomMeetingUuid = zoomMeetingUuid;
       liveClass.zoomStartUrl = zoomStartUrl;
       liveClass.scheduledAt = meeting.scheduledAt;
       liveClass.duration = meeting.duration;
