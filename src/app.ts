@@ -18,11 +18,16 @@ import studentPortalRoutes from './routes/studentPortal.routes';
 import { startAttendanceJob } from './jobs/attendance.job';
 
 const app: Application = express();
+const allowedOrigins = Array.from(new Set([
+  config.frontendUrl,
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+]));
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors({
-  origin: config.frontendUrl,
+  origin: allowedOrigins,
   credentials: true,
 }));
 app.use('/api/zoom/webhook', express.raw({ type: 'application/json' }), zoomWebhookRoutes);
