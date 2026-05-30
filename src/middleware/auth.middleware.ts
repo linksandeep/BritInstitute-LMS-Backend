@@ -8,6 +8,7 @@ export interface AuthRequest extends Request {
     id: string;
     role: string;
     username: string;
+    sessionId?: string;
   };
 }
 
@@ -20,7 +21,7 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
     }
 
     const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, config.jwtSecret) as { id: string; role: string; username: string };
+    const decoded = jwt.verify(token, config.jwtSecret) as { id: string; role: string; username: string; sessionId?: string };
 
     const user = await User.findById(decoded.id);
     if (!user || !user.isActive) {
@@ -28,7 +29,7 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
       return;
     }
 
-    req.user = { id: decoded.id, role: decoded.role, username: decoded.username };
+    req.user = { id: decoded.id, role: decoded.role, username: decoded.username, sessionId: decoded.sessionId };
     next();
   } catch {
     res.status(401).json({ success: false, message: 'Invalid token' });

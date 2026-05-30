@@ -5,6 +5,7 @@ import {
   createUser, getUsers, updateUser, deleteUser,
   createCourse, getCourses, updateCourse, deleteCourse,
   getTeachersForCourseAccess,
+  getActivityAnalytics,
   getStats,
 } from '../controllers/admin.controller';
 
@@ -15,6 +16,7 @@ router.use(protect, adminOnly);
 
 // Stats
 router.get('/stats', getStats);
+router.get('/activity', getActivityAnalytics);
 
 // Users
 router.post('/users', createUser);

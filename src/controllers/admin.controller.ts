@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { User } from '../models/User.model';
 import { Course } from '../models/Course.model';
 import { Batch } from '../models/Batch.model';
+import { UserSession } from '../models/UserSession.model';
 import { AuthRequest } from '../middleware/auth.middleware';
 import {
   getErrorMessage,
@@ -375,5 +376,113 @@ export const getStats = async (_req: AuthRequest, res: Response): Promise<void> 
     res.json({ success: true, stats: { totalStudents, totalCourses, totalBatches } });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error', error: err });
+  }
+};
+
+export const getActivityAnalytics = async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const now = new Date();
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - 6);
+    startOfWeek.setHours(0, 0, 0, 0);
+    const startOfMonth = new Date(now);
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const [users, sessions] = await Promise.all([
+      User.find({ role: { $in: ['student', 'teacher'] } })
+        .select('name username role isActive')
+        .sort({ role: 1, name: 1 })
+        .lean(),
+      UserSession.find({ role: { $in: ['student', 'teacher'] } })
+        .sort({ loginAt: -1 })
+        .limit(1000)
+        .lean(),
+    ]);
+
+    const sessionDuration = (session: any) => {
+      if (session.durationSeconds) return session.durationSeconds;
+      const end = session.logoutAt ? new Date(session.logoutAt) : now;
+      return Math.max(0, Math.floor((end.getTime() - new Date(session.loginAt).getTime()) / 1000));
+    };
+
+    const sessionsByUser = new Map<string, any[]>();
+    for (const session of sessions) {
+      const key = String(session.user);
+      const list = sessionsByUser.get(key) || [];
+      list.push(session);
+      sessionsByUser.set(key, list);
+    }
+
+    const usersWithActivity = users.map((user) => {
+      const userSessions = sessionsByUser.get(String(user._id)) || [];
+      const totalSeconds = userSessions.reduce((sum, session) => sum + sessionDuration(session), 0);
+      const lastSession = userSessions[0];
+      const completedSessions = userSessions.filter((session) => session.logoutAt || session.status !== 'active');
+      const averageSessionSeconds = userSessions.length ? Math.round(totalSeconds / userSessions.length) : 0;
+
+      return {
+        id: user._id,
+        name: user.name,
+        username: user.username,
+        role: user.role,
+        isActive: user.isActive,
+        totalSeconds,
+        averageSessionSeconds,
+        loginCount: userSessions.length,
+        lastLoginAt: lastSession?.loginAt,
+        lastLogoutAt: completedSessions[0]?.logoutAt,
+        lastActiveAt: lastSession?.lastActiveAt,
+        recentSessions: userSessions.slice(0, 8).map((session) => ({
+          id: session._id,
+          loginAt: session.loginAt,
+          logoutAt: session.logoutAt,
+          lastActiveAt: session.lastActiveAt,
+          durationSeconds: sessionDuration(session),
+          status: session.status,
+          logoutReason: session.logoutReason,
+        })),
+      };
+    });
+
+    const usageForRange = (from: Date) => {
+      const rangeSessions = sessions.filter((session) => new Date(session.loginAt) >= from);
+      const totalSeconds = rangeSessions.reduce((sum, session) => sum + sessionDuration(session), 0);
+      return {
+        sessions: rangeSessions.length,
+        totalSeconds,
+        averageSessionSeconds: rangeSessions.length ? Math.round(totalSeconds / rangeSessions.length) : 0,
+      };
+    };
+
+    const totalSeconds = sessions.reduce((sum, session) => sum + sessionDuration(session), 0);
+
+    res.json({
+      success: true,
+      activity: {
+        summary: {
+          totalUsersTracked: users.length,
+          totalSessions: sessions.length,
+          totalSeconds,
+          averageSessionSeconds: sessions.length ? Math.round(totalSeconds / sessions.length) : 0,
+          daily: usageForRange(startOfDay),
+          weekly: usageForRange(startOfWeek),
+          monthly: usageForRange(startOfMonth),
+        },
+        mostActiveStudents: usersWithActivity
+          .filter((user) => user.role === 'student')
+          .sort((a, b) => b.totalSeconds - a.totalSeconds)
+          .slice(0, 10),
+        mostActiveTeachers: usersWithActivity
+          .filter((user) => user.role === 'teacher')
+          .sort((a, b) => b.totalSeconds - a.totalSeconds)
+          .slice(0, 10),
+        users: usersWithActivity.sort((a, b) => b.totalSeconds - a.totalSeconds),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: getErrorMessage(err) });
   }
 };
