@@ -3,7 +3,7 @@ import { protect } from '../middleware/auth.middleware';
 import { adminOnly } from '../middleware/admin.middleware';
 import {
   createLiveClass, getLiveClassesByBatch, getStudentLiveClasses, getAllLiveClasses,
-  updateLiveClass, deleteLiveClass, markAttend,
+  updateLiveClass, deleteLiveClass, markAttend, startLiveClass, endLiveClass,
   getClassAttendance, getStudentAttendance,
 } from '../controllers/liveClass.controller';
 
@@ -21,6 +21,8 @@ router.get('/batch/:batchId', adminOnly, getLiveClassesByBatch);
 
 // Admin CRUD
 router.post('/', adminOnly, createLiveClass);
+router.patch('/:id/start', adminOnly, startLiveClass);
+router.patch('/:id/end', adminOnly, endLiveClass);
 router.put('/:id', adminOnly, updateLiveClass);
 router.delete('/:id', adminOnly, deleteLiveClass);
 

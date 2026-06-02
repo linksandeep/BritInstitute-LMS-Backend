@@ -20,6 +20,22 @@ const getErrorMessage = (err: unknown, fallback: string): string => {
   return fallback;
 };
 
+const getScheduledEndAt = (cls: { scheduledAt: Date; duration: number }) =>
+  new Date(cls.scheduledAt.getTime() + cls.duration * 60 * 1000);
+
+const isExpiredScheduledClass = (cls: { status: string; scheduledAt: Date; duration: number }) =>
+  cls.status === 'scheduled' && getScheduledEndAt(cls).getTime() < Date.now();
+
+const expireScheduledClasses = async (classes: Array<{ _id: unknown; status: string; scheduledAt: Date; duration: number }>) => {
+  const expiredIds = classes
+    .filter(isExpiredScheduledClass)
+    .map((cls) => String(cls._id));
+
+  for (const id of expiredIds) {
+    await autoMarkAbsent(id);
+  }
+};
+
 export const createLiveClass = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { batch, classNumber, topic, scheduledAt, duration } = req.body;
@@ -63,8 +79,16 @@ export const createLiveClass = async (req: AuthRequest, res: Response): Promise<
 export const getLiveClassesByBatch = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { batchId } = req.params;
-    const liveClasses = await LiveClass.find({ batch: batchId }).sort({ scheduledAt: -1 });
-    res.json({ success: true, liveClasses });
+    const liveClasses = await LiveClass.find({ batch: batchId })
+      .populate('batch', 'name course')
+      .populate('instructor', 'name username')
+      .sort({ scheduledAt: -1 });
+    await expireScheduledClasses(liveClasses);
+    const refreshedLiveClasses = await LiveClass.find({ batch: batchId })
+      .populate('batch', 'name course')
+      .populate('instructor', 'name username')
+      .sort({ scheduledAt: -1 });
+    res.json({ success: true, liveClasses: refreshedLiveClasses });
   } catch (err) {
     sendLiveClassError(res, err, 'Unable to load live classes. Please try again.');
   }
@@ -77,10 +101,12 @@ export const getStudentLiveClasses = async (req: AuthRequest, res: Response): Pr
     const batchIds = batches.map(b => b._id);
 
     const liveClasses = await LiveClass.find({ batch: { $in: batchIds } }).sort({ scheduledAt: -1 });
+    await expireScheduledClasses(liveClasses);
+    const currentLiveClasses = await LiveClass.find({ batch: { $in: batchIds } }).sort({ scheduledAt: -1 });
 
     // Attach attendance status
     const enriched = await Promise.all(
-      liveClasses.map(async (cls) => {
+      currentLiveClasses.map(async (cls) => {
         const att = await Attendance.findOne({ liveClass: cls._id, student: req.user!.id });
         const liveClass = cls.toObject();
         delete liveClass.zoomStartUrl;
@@ -98,8 +124,16 @@ export const getStudentLiveClasses = async (req: AuthRequest, res: Response): Pr
 
 export const getAllLiveClasses = async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const liveClasses = await LiveClass.find().populate('batch', 'name').sort({ scheduledAt: -1 });
-    res.json({ success: true, liveClasses });
+    const liveClasses = await LiveClass.find()
+      .populate({ path: 'batch', select: 'name course', populate: { path: 'course', select: 'title' } })
+      .populate('instructor', 'name username')
+      .sort({ scheduledAt: -1 });
+    await expireScheduledClasses(liveClasses);
+    const refreshedLiveClasses = await LiveClass.find()
+      .populate({ path: 'batch', select: 'name course', populate: { path: 'course', select: 'title' } })
+      .populate('instructor', 'name username')
+      .sort({ scheduledAt: -1 });
+    res.json({ success: true, liveClasses: refreshedLiveClasses });
   } catch (err) {
     sendLiveClassError(res, err, 'Unable to load live classes. Please try again.');
   }
@@ -120,6 +154,8 @@ export const updateLiveClass = async (req: AuthRequest, res: Response): Promise<
       scheduledAt: Date;
       duration: number;
       meetingLink: string;
+      instructor: string | null;
+      status: 'scheduled' | 'live';
     }> = {};
 
     if (req.body.batch !== undefined) allowedUpdates.batch = req.body.batch;
@@ -134,6 +170,10 @@ export const updateLiveClass = async (req: AuthRequest, res: Response): Promise<
       allowedUpdates.scheduledAt = startTime;
     }
     if (req.body.duration !== undefined) allowedUpdates.duration = Number(req.body.duration) || existing.duration;
+    if (req.body.instructor !== undefined) allowedUpdates.instructor = req.body.instructor || null;
+    if (existing.status === 'ended' && (req.body.scheduledAt !== undefined || req.body.duration !== undefined)) {
+      allowedUpdates.status = 'scheduled';
+    }
 
     if (existing.zoomMeetingId) {
       await updateZoomMeeting(existing.zoomMeetingId, {
@@ -154,6 +194,56 @@ export const updateLiveClass = async (req: AuthRequest, res: Response): Promise<
     res.json({ success: true, liveClass: cls });
   } catch (err) {
     sendLiveClassError(res, err, 'Unable to update live class. Please try again.');
+  }
+};
+
+export const startLiveClass = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const cls = await LiveClass.findById(req.params.id);
+    if (!cls) {
+      res.status(404).json({ success: false, message: 'Live class not found' });
+      return;
+    }
+
+    if (cls.status === 'ended') {
+      res.status(400).json({ success: false, message: 'This class has already ended' });
+      return;
+    }
+
+    if (isExpiredScheduledClass(cls)) {
+      await autoMarkAbsent(String(cls._id));
+      res.status(400).json({ success: false, message: 'This class schedule has already ended' });
+      return;
+    }
+
+    cls.status = 'live';
+    cls.startedAt = cls.startedAt || new Date();
+    cls.endedAt = undefined;
+    await cls.save();
+    await syncRecordedLectureForLiveClass(cls);
+
+    res.json({ success: true, liveClass: cls });
+  } catch (err) {
+    sendLiveClassError(res, err, 'Unable to start live class. Please try again.');
+  }
+};
+
+export const endLiveClass = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const cls = await LiveClass.findById(req.params.id);
+    if (!cls) {
+      res.status(404).json({ success: false, message: 'Live class not found' });
+      return;
+    }
+
+    if (cls.status !== 'ended') {
+      await autoMarkAbsent(String(cls._id));
+    }
+
+    const updated = await LiveClass.findById(req.params.id);
+    res.json({ success: true, liveClass: updated });
+  } catch (err) {
+    sendLiveClassError(res, err, 'Unable to end live class. Please try again.');
   }
 };
 
@@ -204,19 +294,19 @@ export const markAttend = async (req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
-    // Allow students to join from 30 minutes before start until the scheduled class duration ends.
+    if (isExpiredScheduledClass(cls)) {
+      await autoMarkAbsent(String(cls._id));
+      res.status(400).json({ success: false, message: 'This class has already finished' });
+      return;
+    }
+
+    // Allow students to join from 30 minutes before start until the teacher ends the class.
     const now = new Date();
     const scheduledAt = new Date(cls.scheduledAt);
     const joinOpensAt = new Date(scheduledAt.getTime() - 30 * 60 * 1000);
-    const classEndsAt = new Date(scheduledAt.getTime() + cls.duration * 60 * 1000);
 
     if (now < joinOpensAt) {
        res.status(400).json({ success: false, message: 'Class has not started yet' });
-       return;
-    }
-
-    if (now > classEndsAt) {
-       res.status(400).json({ success: false, message: 'This class has already finished' });
        return;
     }
 
@@ -275,7 +365,7 @@ export const autoMarkAbsent = async (liveClassId: string): Promise<void> => {
     }
   }
 
-  // Mark class as ended
-  await LiveClass.findByIdAndUpdate(liveClassId, { status: 'ended' });
+  // Mark class as ended only when the teacher/admin closes it or an explicit end action runs.
+  await LiveClass.findByIdAndUpdate(liveClassId, { status: 'ended', endedAt: new Date() });
   console.log(`📋 Auto-marked absent for class ${cls.classNumber} (${cls.topic})`);
 };

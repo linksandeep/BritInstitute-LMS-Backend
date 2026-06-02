@@ -8,11 +8,9 @@ export const startAttendanceJob = (): void => {
   cron.schedule('*/5 * * * *', async () => {
     try {
       const now = new Date();
+      const expiredScheduledClasses = await LiveClass.find({ status: 'scheduled' });
 
-      // Find all scheduled classes that have passed their end time
-      const endedClasses = await LiveClass.find({ status: 'scheduled' });
-
-      for (const cls of endedClasses) {
+      for (const cls of expiredScheduledClasses) {
         const endTime = new Date(cls.scheduledAt.getTime() + cls.duration * 60 * 1000);
         if (now > endTime) {
           await autoMarkAbsent(String(cls._id));
@@ -28,5 +26,5 @@ export const startAttendanceJob = (): void => {
     }
   });
 
-  console.log('⏰ Attendance auto-mark job started (every 5 minutes)');
+  console.log('⏰ Live class background job started (every 5 minutes)');
 };

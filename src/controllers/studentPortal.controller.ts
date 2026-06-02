@@ -16,8 +16,8 @@ const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
 const getClassEndAt = (liveClass: { scheduledAt: Date; duration: number }) =>
   new Date(new Date(liveClass.scheduledAt).getTime() + liveClass.duration * 60 * 1000);
 
-const isFinishedClass = (liveClass: { scheduledAt: Date; duration: number }) =>
-  getClassEndAt(liveClass).getTime() < Date.now();
+const isFinishedClass = (liveClass: { status?: string; scheduledAt: Date; duration: number }) =>
+  liveClass.status === 'ended' || (liveClass.status !== 'live' && getClassEndAt(liveClass).getTime() < Date.now());
 
 const getStudentPortalSnapshot = async (studentId: string) => {
   const batches = await Batch.find({ students: studentId, isActive: true })
@@ -71,9 +71,9 @@ const getStudentPortalSnapshot = async (studentId: string) => {
   const ongoingClasses = liveClasses.filter((liveClass) => {
     const startAt = new Date(liveClass.scheduledAt).getTime();
     const endAt = getClassEndAt(liveClass).getTime();
-    return startAt <= now && endAt >= now;
+    return liveClass.status !== 'ended' && (liveClass.status === 'live' || (startAt <= now && endAt >= now));
   });
-  const upcomingClasses = liveClasses.filter((liveClass) => new Date(liveClass.scheduledAt).getTime() > now);
+  const upcomingClasses = liveClasses.filter((liveClass) => liveClass.status !== 'ended' && new Date(liveClass.scheduledAt).getTime() > now);
 
   const curriculumTopics = curriculums.reduce(
     (sum, curriculum) =>

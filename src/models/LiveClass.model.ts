@@ -12,6 +12,9 @@ export interface ILiveClass extends Document {
   zoomStartUrl?: string;
   scheduledAt: Date;
   duration: number; // minutes
+  instructor?: mongoose.Types.ObjectId;
+  startedAt?: Date;
+  endedAt?: Date;
   status: LiveClassStatus;
   createdBy: mongoose.Types.ObjectId;
   createdAt: Date;
@@ -29,6 +32,9 @@ const liveClassSchema = new Schema<ILiveClass>(
     zoomStartUrl: { type: String },
     scheduledAt: { type: Date, required: true },
     duration: { type: Number, required: true, default: 60 },
+    instructor: { type: Schema.Types.ObjectId, ref: 'User' },
+    startedAt: { type: Date },
+    endedAt: { type: Date },
     status: { type: String, enum: ['scheduled', 'live', 'ended'], default: 'scheduled' },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },

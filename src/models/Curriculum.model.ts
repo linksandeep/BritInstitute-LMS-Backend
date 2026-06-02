@@ -7,6 +7,7 @@ export interface ICurriculumTopic {
   scheduledAt?: Date;
   meetingLink?: string;
   liveClassId?: mongoose.Types.ObjectId;
+  instructor?: mongoose.Types.ObjectId;
 }
 
 export interface ICurriculumModule {
@@ -19,6 +20,8 @@ export interface ICurriculum extends Document {
   title: string;
   course: mongoose.Types.ObjectId;
   batch?: mongoose.Types.ObjectId | null;
+  sourceTemplate?: mongoose.Types.ObjectId | null;
+  isArchived: boolean;
   modules: ICurriculumModule[];
   createdAt: Date;
   updatedAt: Date;
@@ -31,6 +34,7 @@ const curriculumTopicSchema = new Schema<ICurriculumTopic>(
     scheduledAt: { type: Date },
     meetingLink: { type: String, trim: true },
     liveClassId: { type: Schema.Types.ObjectId, ref: 'LiveClass' },
+    instructor: { type: Schema.Types.ObjectId, ref: 'User' },
   },
   { _id: true }
 );
@@ -48,6 +52,8 @@ const curriculumSchema = new Schema<ICurriculum>(
     title: { type: String, required: true, trim: true },
     course: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
     batch: { type: Schema.Types.ObjectId, ref: 'Batch', default: null },
+    sourceTemplate: { type: Schema.Types.ObjectId, ref: 'Curriculum', default: null },
+    isArchived: { type: Boolean, default: false },
     modules: { type: [curriculumModuleSchema], default: [] },
   },
   { timestamps: true }
@@ -55,5 +61,7 @@ const curriculumSchema = new Schema<ICurriculum>(
 
 curriculumSchema.index({ batch: 1 }, { unique: true, partialFilterExpression: { batch: { $type: 'objectId' } } });
 curriculumSchema.index({ course: 1, batch: 1 });
+curriculumSchema.index({ sourceTemplate: 1 });
+curriculumSchema.index({ isArchived: 1 });
 
 export const Curriculum = mongoose.model<ICurriculum>('Curriculum', curriculumSchema);

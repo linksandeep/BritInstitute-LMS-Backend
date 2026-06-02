@@ -31,16 +31,84 @@ const stripIds = (modules: any[]) =>
       scheduledAt: topic.scheduledAt,
       meetingLink: topic.meetingLink,
       liveClassId: topic.liveClassId,
+      instructor: topic.instructor,
     })),
   }));
 
-const getDerivedStatus = (scheduledAt: Date, duration: number) => {
-  const now = Date.now();
-  const start = new Date(scheduledAt).getTime();
-  const end = start + duration * 60 * 1000;
-  if (now < start) return 'scheduled';
-  if (now > end) return 'ended';
-  return 'live';
+const sanitizeTemplateModules = (modules: any[]) =>
+  modules.map((module: any, moduleIndex: number) => {
+    const moduleTitle = String(module.title || '').trim();
+    if (!moduleTitle) {
+      throw new Error(`Module ${moduleIndex + 1} title is required`);
+    }
+
+    const topics = Array.isArray(module.topics) ? module.topics : [];
+    if (topics.length === 0) {
+      throw new Error(`${moduleTitle} must include at least one class/topic`);
+    }
+
+    return {
+      title: moduleTitle,
+      topics: topics.map((topic: any, topicIndex: number) => {
+        const topicTitle = String(topic.title || '').trim();
+        if (!topicTitle) {
+          throw new Error(`${moduleTitle}, topic ${topicIndex + 1} title is required`);
+        }
+
+        return {
+          title: topicTitle,
+          duration: Math.max(Number(topic.duration) || 60, 1),
+        };
+      }),
+    };
+  });
+
+const getTemplateUsage = async (templates: any[]) => {
+  if (!templates.length) return new Map<string, any[]>();
+
+  const templateIds = templates.map((template) => template._id);
+  const templateIdStrings = new Set(templateIds.map((id) => id.toString()));
+  const templatesById = new Map(templates.map((template) => [template._id.toString(), template]));
+  const templateTitles = templates.map((template) => template.title);
+  const batchCurriculums = await Curriculum.find({
+    batch: { $ne: null },
+    $or: [
+      { sourceTemplate: { $in: templateIds } },
+      { sourceTemplate: null, title: { $in: templateTitles } },
+    ],
+  })
+    .populate('batch', 'name isActive students startDate endDate')
+    .select('title course batch sourceTemplate')
+    .lean();
+
+  const usage = new Map<string, any[]>();
+  for (const curriculum of batchCurriculums as any[]) {
+    const sourceId = curriculum.sourceTemplate?.toString();
+    const matchingTemplate = sourceId && templateIdStrings.has(sourceId)
+      ? templatesById.get(sourceId)
+      : templates.find((template) => (
+        template.title === curriculum.title && template.course?._id?.toString?.() === curriculum.course?.toString?.()
+      ));
+    const matchingTemplateId = matchingTemplate?._id?.toString();
+
+    if (!matchingTemplateId) continue;
+    const batch = curriculum.batch;
+    if (!batch) continue;
+
+    usage.set(matchingTemplateId, [
+      ...(usage.get(matchingTemplateId) || []),
+      {
+        _id: batch._id,
+        name: batch.name,
+        isActive: batch.isActive,
+        studentCount: batch.students?.length || 0,
+        startDate: batch.startDate,
+        endDate: batch.endDate,
+      },
+    ]);
+  }
+
+  return usage;
 };
 
 const getLinkedLiveClassIds = (modules: any[]) =>
@@ -80,6 +148,8 @@ const cloneTemplateToBatch = async (template: any, batchId: string, batchCourse:
     title: templateData.title,
     course: batchCourse,
     batch: new mongoose.Types.ObjectId(batchId),
+    sourceTemplate: template._id,
+    isArchived: false,
     modules: stripIds(templateData.modules || []),
   });
 };
@@ -113,7 +183,9 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
   for (const module of modules) {
     for (const topic of module.topics || []) {
       const title = String(topic.title || '').trim();
-      const duration = Number(topic.duration) || 60;
+      const duration = Math.max(Number(topic.duration) || 60, 1);
+      const manualMeetingLink = String(topic.meetingLink || '').trim();
+      const instructor = topic.instructor || null;
 
       if (topic.liveClassId && !topic.scheduledAt) {
         const liveClass = await LiveClass.findById(topic.liveClassId);
@@ -130,7 +202,7 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
         const scheduledAt = new Date(topic.scheduledAt);
         const zoomTopic = `Class ${classCounter} - ${title}`;
         const existingLiveClass = topic.liveClassId ? await LiveClass.findById(topic.liveClassId) : null;
-        let meetingLink = existingLiveClass?.meetingLink || String(topic.meetingLink || '').trim();
+        let meetingLink = manualMeetingLink || existingLiveClass?.meetingLink || '';
         let zoomMeetingId = existingLiveClass?.zoomMeetingId;
         let zoomMeetingUuid = existingLiveClass?.zoomMeetingUuid;
         let zoomStartUrl = existingLiveClass?.zoomStartUrl;
@@ -141,7 +213,7 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
             startTime: scheduledAt,
             duration,
           });
-        } else {
+        } else if (!manualMeetingLink) {
           const zoomMeeting = await createZoomMeeting({
             topic: zoomTopic,
             startTime: scheduledAt,
@@ -163,7 +235,8 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
           zoomStartUrl,
           scheduledAt,
           duration,
-          status: getDerivedStatus(scheduledAt, duration),
+          instructor,
+          status: existingLiveClass?.status === 'live' ? 'live' : 'scheduled',
           createdBy: adminId,
         };
 
@@ -177,6 +250,7 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
         }
 
         topic.meetingLink = meetingLink;
+        topic.instructor = instructor || undefined;
         nextLinkedIds.add(topic.liveClassId.toString());
       }
 
@@ -190,11 +264,20 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
 
 export const getDefaultCurriculums = async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const curriculums = await Curriculum.find({ batch: null })
+    const includeArchived = _req.query.includeArchived === 'true';
+    const curriculums = await Curriculum.find({ batch: null, ...(includeArchived ? {} : { isArchived: { $ne: true } }) })
       .populate('course', 'title description')
-      .sort({ createdAt: 1 });
+      .sort({ isArchived: 1, createdAt: 1 })
+      .lean();
 
-    res.json({ success: true, curriculums });
+    const usage = await getTemplateUsage(curriculums);
+    const curriculumsWithUsage = curriculums.map((curriculum: any) => ({
+      ...curriculum,
+      usageBatches: usage.get(curriculum._id.toString()) || [],
+      usageCount: usage.get(curriculum._id.toString())?.length || 0,
+    }));
+
+    res.json({ success: true, curriculums: curriculumsWithUsage });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Unable to load curriculums. Please try again.' });
   }
@@ -216,37 +299,13 @@ export const createDefaultCurriculum = async (req: AuthRequest, res: Response): 
       return;
     }
 
-    const sanitizedModules = modules.map((module: any, moduleIndex: number) => {
-      const moduleTitle = String(module.title || '').trim();
-      if (!moduleTitle) {
-        throw new Error(`Module ${moduleIndex + 1} title is required`);
-      }
-
-      const topics = Array.isArray(module.topics) ? module.topics : [];
-      if (topics.length === 0) {
-        throw new Error(`${moduleTitle} must include at least one class/topic`);
-      }
-
-      return {
-        title: moduleTitle,
-        topics: topics.map((topic: any, topicIndex: number) => {
-          const topicTitle = String(topic.title || '').trim();
-          if (!topicTitle) {
-            throw new Error(`${moduleTitle}, topic ${topicIndex + 1} title is required`);
-          }
-
-          return {
-            title: topicTitle,
-            duration: Math.max(Number(topic.duration) || 60, 1),
-          };
-        }),
-      };
-    });
+    const sanitizedModules = sanitizeTemplateModules(modules);
 
     const curriculum = await Curriculum.create({
       title: cleanTitle,
       course,
       batch: null,
+      isArchived: false,
       modules: sanitizedModules,
     });
 
@@ -255,6 +314,118 @@ export const createDefaultCurriculum = async (req: AuthRequest, res: Response): 
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create curriculum';
     res.status(400).json({ success: false, message });
+  }
+};
+
+export const updateDefaultCurriculum = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { title, course, modules, isArchived } = req.body;
+    const cleanTitle = String(title || '').trim();
+
+    if (!cleanTitle || !course || !Array.isArray(modules) || modules.length === 0) {
+      res.status(400).json({ success: false, message: 'Title, course, and at least one module are required' });
+      return;
+    }
+
+    const curriculum = await Curriculum.findOne({ _id: req.params.curriculumId, batch: null });
+    if (!curriculum) {
+      res.status(404).json({ success: false, message: 'Curriculum template not found' });
+      return;
+    }
+
+    const courseExists = await Course.findById(course);
+    if (!courseExists) {
+      res.status(404).json({ success: false, message: 'Course not found' });
+      return;
+    }
+
+    curriculum.title = cleanTitle;
+    curriculum.course = getObjectId(course);
+    curriculum.modules = sanitizeTemplateModules(modules) as any;
+    if (typeof isArchived === 'boolean') curriculum.isArchived = isArchived;
+    await curriculum.save();
+
+    const populatedCurriculum = await Curriculum.findById(curriculum._id).populate('course', 'title description');
+    res.json({ success: true, curriculum: populatedCurriculum });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to update curriculum';
+    res.status(400).json({ success: false, message });
+  }
+};
+
+export const duplicateDefaultCurriculum = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const template = await Curriculum.findOne({ _id: req.params.curriculumId, batch: null });
+    if (!template) {
+      res.status(404).json({ success: false, message: 'Curriculum template not found' });
+      return;
+    }
+
+    const duplicate = await Curriculum.create({
+      title: `${template.title} Copy`,
+      course: template.course,
+      batch: null,
+      isArchived: false,
+      modules: stripIds(template.modules || []),
+    });
+
+    const populatedCurriculum = await Curriculum.findById(duplicate._id).populate('course', 'title description');
+    res.status(201).json({ success: true, curriculum: populatedCurriculum });
+  } catch (error) {
+    res.status(400).json({ success: false, message: 'Failed to duplicate curriculum' });
+  }
+};
+
+export const archiveDefaultCurriculum = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const curriculum = await Curriculum.findOneAndUpdate(
+      { _id: req.params.curriculumId, batch: null },
+      { isArchived: true },
+      { new: true }
+    ).populate('course', 'title description');
+
+    if (!curriculum) {
+      res.status(404).json({ success: false, message: 'Curriculum template not found' });
+      return;
+    }
+
+    res.json({ success: true, curriculum });
+  } catch (error) {
+    res.status(400).json({ success: false, message: 'Failed to archive curriculum' });
+  }
+};
+
+export const deleteDefaultCurriculum = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const template = await Curriculum.findOne({ _id: req.params.curriculumId, batch: null });
+    if (!template) {
+      res.status(404).json({ success: false, message: 'Curriculum template not found' });
+      return;
+    }
+
+    const usageCount = await Curriculum.countDocuments({
+      batch: { $ne: null },
+      $or: [
+        { sourceTemplate: template._id },
+        { sourceTemplate: null, title: template.title, course: template.course },
+      ],
+    });
+
+    if (usageCount > 0) {
+      template.isArchived = true;
+      await template.save();
+      res.json({
+        success: true,
+        archived: true,
+        message: 'Curriculum is used by batches, so it was archived instead of deleted.',
+      });
+      return;
+    }
+
+    await template.deleteOne();
+    res.json({ success: true, deleted: true });
+  } catch (error) {
+    res.status(400).json({ success: false, message: 'Failed to delete curriculum' });
   }
 };
 
@@ -284,7 +455,7 @@ export const assignCurriculumToBatch = async (req: AuthRequest, res: Response): 
 
     const [batch, template, existingBatchCurriculum] = await Promise.all([
       Batch.findById(batchId),
-      Curriculum.findOne({ _id: curriculumId, batch: null }),
+      Curriculum.findOne({ _id: curriculumId, batch: null, isArchived: { $ne: true } }),
       Curriculum.findOne({ batch: batchId }),
     ]);
 
@@ -304,6 +475,8 @@ export const assignCurriculumToBatch = async (req: AuthRequest, res: Response): 
 
       existingBatchCurriculum.title = template.title;
       existingBatchCurriculum.course = getObjectId(batch.course);
+      existingBatchCurriculum.sourceTemplate = template._id as any;
+      existingBatchCurriculum.isArchived = false;
       existingBatchCurriculum.modules = stripIds(template.modules || []) as any;
       await existingBatchCurriculum.save();
 
@@ -344,10 +517,11 @@ export const updateBatchCurriculum = async (req: AuthRequest, res: Response): Pr
       topics: (module.topics || []).map((topic: any) => ({
         _id: topic._id,
         title: String(topic.title || '').trim(),
-        duration: Number(topic.duration) || 60,
+        duration: Math.max(Number(topic.duration) || 60, 1),
         scheduledAt: topic.scheduledAt || undefined,
         meetingLink: topic.meetingLink ? String(topic.meetingLink).trim() : '',
         liveClassId: topic.liveClassId || undefined,
+        instructor: topic.instructor || undefined,
       })),
     }));
 
