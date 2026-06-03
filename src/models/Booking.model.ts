@@ -33,4 +33,7 @@ const bookingSchema = new Schema<IBooking>(
   { timestamps: true }
 );
 
+bookingSchema.index({ mentor: 1, dateTime: 1, status: 1 });
+bookingSchema.index({ student: 1, dateTime: 1 });
+
 export const Booking = mongoose.model<IBooking>('Booking', bookingSchema);
