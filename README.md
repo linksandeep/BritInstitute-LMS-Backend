@@ -176,6 +176,7 @@ Main route groups:
 
 - `POST /auth/login` - user login
 - `GET /auth/me` - current authenticated user
+- `PUT /auth/password` - change the authenticated user's password
 - `GET /auth/session-config` - inactivity timeout config
 - `POST /auth/heartbeat` - update user activity
 - `POST /auth/logout` - close current session

@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { User } from '../models/User.model';
 import { UserSession } from '../models/UserSession.model';
 import { config } from '../config/env';
-import { getErrorMessage, normalizeUsername } from '../utils/validation';
+import { getErrorMessage, normalizeUsername, validatePassword } from '../utils/validation';
 
 const getSessionDurationSeconds = (loginAt: Date, endAt = new Date()) =>
   Math.max(0, Math.floor((endAt.getTime() - loginAt.getTime()) / 1000));
@@ -130,6 +130,55 @@ export const getMe = async (req: Request & { user?: { id: string } }, res: Respo
       return;
     }
     res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, message: getErrorMessage(err) });
+  }
+};
+
+export const changePassword = async (req: Request & { user?: { id: string } }, res: Response): Promise<void> => {
+  try {
+    const currentPassword = String(req.body.currentPassword || '');
+    const newPassword = String(req.body.newPassword || '');
+    const confirmPassword = String(req.body.confirmPassword || '');
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      res.status(400).json({ success: false, message: 'Current password, new password and confirmation are required' });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      res.status(400).json({ success: false, message: 'New password and confirmation do not match' });
+      return;
+    }
+
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
+      res.status(400).json({ success: false, message: passwordError });
+      return;
+    }
+
+    const user = await User.findById(req.user?.id).select('+password');
+    if (!user || !user.isActive) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    const isCurrentPasswordValid = await user.comparePassword(currentPassword);
+    if (!isCurrentPasswordValid) {
+      res.status(401).json({ success: false, message: 'Current password is incorrect' });
+      return;
+    }
+
+    const isSamePassword = await user.comparePassword(newPassword);
+    if (isSamePassword) {
+      res.status(400).json({ success: false, message: 'New password must be different from the current password' });
+      return;
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    res.json({ success: true, message: 'Password updated successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: getErrorMessage(err) });
   }
