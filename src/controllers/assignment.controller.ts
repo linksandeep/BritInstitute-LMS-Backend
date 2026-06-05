@@ -4,6 +4,7 @@ import { Assignment } from '../models/Assignment.model';
 import { AssignmentSubmission } from '../models/AssignmentSubmission.model';
 import { Batch } from '../models/Batch.model';
 import { User } from '../models/User.model';
+import { parseUkDateTime } from '../utils/ukTime';
 
 export const createAssignment = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -12,8 +13,14 @@ export const createAssignment = async (req: AuthRequest, res: Response): Promise
       res.status(400).json({ success: false, message: 'Batch, title, description and dueDate are required' });
       return;
     }
+    const parsedDueDate = parseUkDateTime(dueDate);
+    if (!parsedDueDate) {
+      res.status(400).json({ success: false, message: 'Invalid dueDate' });
+      return;
+    }
+
     const assignment = await Assignment.create({
-      batch, title, description, dueDate, attachmentUrl: attachmentUrl || '',
+      batch, title, description, dueDate: parsedDueDate, attachmentUrl: attachmentUrl || '',
       createdBy: req.user!.id,
     });
     res.status(201).json({ success: true, assignment });
@@ -80,7 +87,17 @@ export const getAllAssignments = async (req: AuthRequest, res: Response): Promis
 
 export const updateAssignment = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const assignment = await Assignment.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const updates = { ...req.body };
+    if (updates.dueDate !== undefined) {
+      const parsedDueDate = parseUkDateTime(updates.dueDate);
+      if (!parsedDueDate) {
+        res.status(400).json({ success: false, message: 'Invalid dueDate' });
+        return;
+      }
+      updates.dueDate = parsedDueDate;
+    }
+
+    const assignment = await Assignment.findByIdAndUpdate(req.params.id, updates, { new: true });
     if (!assignment) {
       res.status(404).json({ success: false, message: 'Assignment not found' });
       return;

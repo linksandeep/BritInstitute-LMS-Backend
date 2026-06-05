@@ -8,6 +8,7 @@ import { LectureProgress } from '../models/LectureProgress.model';
 import { LiveClass } from '../models/LiveClass.model';
 import { RecordedLecture } from '../models/RecordedLecture.model';
 import { Assignment } from '../models/Assignment.model';
+import { parseUkDateTime } from '../utils/ukTime';
 
 // ─── Create Batch ─────────────────────────────────────────────────────────────
 export const createBatch = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -17,8 +18,15 @@ export const createBatch = async (req: AuthRequest, res: Response): Promise<void
       res.status(400).json({ success: false, message: 'Name, course and start date are required' });
       return;
     }
+    const parsedStartDate = parseUkDateTime(startDate);
+    const parsedEndDate = endDate ? parseUkDateTime(endDate) : undefined;
+    if (!parsedStartDate || (endDate && !parsedEndDate)) {
+      res.status(400).json({ success: false, message: 'Invalid batch date' });
+      return;
+    }
+
     const batch = await Batch.create({
-      name, description, course, startDate, endDate,
+      name, description, course, startDate: parsedStartDate, endDate: parsedEndDate,
       createdBy: req.user!.id,
     });
     const populated = await Batch.findById(batch._id)
@@ -62,7 +70,25 @@ export const getBatch = async (req: AuthRequest, res: Response): Promise<void> =
 // ─── Update Batch ─────────────────────────────────────────────────────────────
 export const updateBatch = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const batch = await Batch.findByIdAndUpdate(req.params.id, req.body, { new: true })
+    const updates = { ...req.body };
+    if (updates.startDate !== undefined) {
+      const parsedStartDate = parseUkDateTime(updates.startDate);
+      if (!parsedStartDate) {
+        res.status(400).json({ success: false, message: 'Invalid start date' });
+        return;
+      }
+      updates.startDate = parsedStartDate;
+    }
+    if (updates.endDate !== undefined) {
+      const parsedEndDate = updates.endDate ? parseUkDateTime(updates.endDate) : undefined;
+      if (updates.endDate && !parsedEndDate) {
+        res.status(400).json({ success: false, message: 'Invalid end date' });
+        return;
+      }
+      updates.endDate = parsedEndDate;
+    }
+
+    const batch = await Batch.findByIdAndUpdate(req.params.id, updates, { new: true })
       .populate('course', 'title description')
       .populate('students', 'name username isActive');
     if (!batch) {

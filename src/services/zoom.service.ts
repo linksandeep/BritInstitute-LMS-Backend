@@ -1,4 +1,5 @@
 import { config } from '../config/env';
+import { formatUkMeetingRange, getUkZoomDateTimeValue, UK_TIME_ZONE } from '../utils/ukTime';
 
 interface ZoomTokenResponse {
   access_token: string;
@@ -120,6 +121,9 @@ const encodeZoomMeetingIdentifier = (meetingId: string): string => {
   return /[/?#]/.test(meetingId) ? encodeURIComponent(encoded) : encoded;
 };
 
+const getZoomMeetingAgenda = (startTime: Date, duration: number): string =>
+  `UK/London time: ${formatUkMeetingRange(startTime, duration)}`;
+
 export const createZoomMeeting = async ({ topic, startTime, duration }: ZoomMeetingInput): Promise<ZoomMeetingResponse> => {
   const response = await fetch('https://api.zoom.us/v2/users/me/meetings', {
     method: 'POST',
@@ -130,9 +134,10 @@ export const createZoomMeeting = async ({ topic, startTime, duration }: ZoomMeet
     body: JSON.stringify({
       topic,
       type: 2,
-      start_time: startTime.toISOString(),
+      start_time: getUkZoomDateTimeValue(startTime),
       duration,
-      timezone: 'Asia/Kolkata',
+      timezone: UK_TIME_ZONE,
+      agenda: getZoomMeetingAgenda(startTime, duration),
       settings: {
         join_before_host: false,
         waiting_room: true,
@@ -164,9 +169,10 @@ export const updateZoomMeeting = async (
     },
     body: JSON.stringify({
       topic,
-      start_time: startTime.toISOString(),
+      start_time: getUkZoomDateTimeValue(startTime),
       duration,
-      timezone: 'Asia/Kolkata',
+      timezone: UK_TIME_ZONE,
+      agenda: getZoomMeetingAgenda(startTime, duration),
       settings: {
         auto_recording: 'cloud',
       },

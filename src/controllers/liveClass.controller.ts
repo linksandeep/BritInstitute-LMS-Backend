@@ -5,6 +5,7 @@ import { Attendance } from '../models/Attendance.model';
 import { Batch } from '../models/Batch.model';
 import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting, ZoomApiError } from '../services/zoom.service';
 import { deleteRecordedLectureForLiveClass, syncRecordedLectureForLiveClass } from '../services/recordedLectureSync.service';
+import { parseUkDateTime } from '../utils/ukTime';
 
 const sendLiveClassError = (res: Response, err: unknown, fallback: string): void => {
   if (err instanceof ZoomApiError) {
@@ -44,8 +45,8 @@ export const createLiveClass = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
-    const startTime = new Date(scheduledAt);
-    if (Number.isNaN(startTime.getTime())) {
+    const startTime = parseUkDateTime(scheduledAt);
+    if (!startTime) {
       res.status(400).json({ success: false, message: 'Invalid scheduled date' });
       return;
     }
@@ -162,8 +163,8 @@ export const updateLiveClass = async (req: AuthRequest, res: Response): Promise<
     if (req.body.classNumber !== undefined) allowedUpdates.classNumber = req.body.classNumber;
     if (req.body.topic !== undefined) allowedUpdates.topic = req.body.topic;
     if (req.body.scheduledAt !== undefined) {
-      const startTime = new Date(req.body.scheduledAt);
-      if (Number.isNaN(startTime.getTime())) {
+      const startTime = parseUkDateTime(req.body.scheduledAt);
+      if (!startTime) {
         res.status(400).json({ success: false, message: 'Invalid scheduled date' });
         return;
       }

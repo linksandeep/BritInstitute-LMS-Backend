@@ -3,6 +3,7 @@ import { AuthRequest } from '../middleware/auth.middleware';
 import { Booking } from '../models/Booking.model';
 import { User } from '../models/User.model';
 import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting, ZoomApiError } from '../services/zoom.service';
+import { formatUkTime, getUkDateBounds, parseUkDate, parseUkDateTime } from '../utils/ukTime';
 
 const BOOKING_SLOT_STATUSES = ['pending', 'accepted'] as const;
 const DEFAULT_SLOT_MINUTES = 30;
@@ -41,8 +42,8 @@ const parseDuration = (value: unknown, fallback = DEFAULT_SLOT_MINUTES): number 
 };
 
 const parseSessionStartTime = (value: unknown): Date | null => {
-  const startTime = new Date(String(value));
-  if (Number.isNaN(startTime.getTime())) return null;
+  const startTime = parseUkDateTime(value);
+  if (!startTime) return null;
   startTime.setSeconds(0, 0);
   return startTime;
 };
@@ -50,13 +51,7 @@ const parseSessionStartTime = (value: unknown): Date | null => {
 const getBookingEndTime = (booking: BlockingBooking): Date =>
   new Date(booking.dateTime.getTime() + parseDuration(booking.duration) * 60 * 1000);
 
-const getDateBounds = (value: Date): { dayStart: Date; dayEnd: Date } => {
-  const dayStart = new Date(value);
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
-  return { dayStart, dayEnd };
-};
+const getDateBounds = getUkDateBounds;
 
 const parseAvailabilityDate = (value: unknown): { date: Date; key: string } | null => {
   const key = String(value || '').trim();
@@ -64,8 +59,8 @@ const parseAvailabilityDate = (value: unknown): { date: Date; key: string } | nu
   if (!match) return null;
 
   const [, y, m, d] = match;
-  const date = new Date(Number(y), Number(m) - 1, Number(d), 0, 0, 0, 0);
-  if (Number.isNaN(date.getTime())) return null;
+  const date = parseUkDate(`${y}-${m}-${d}`);
+  if (!date) return null;
 
   return { date, key };
 };
@@ -152,15 +147,14 @@ export const getMentorAvailability = async (req: AuthRequest, res: Response): Pr
 
     for (let hour = SLOT_START_HOUR; hour < SLOT_END_HOUR; hour += 1) {
       for (const minute of [0, 30]) {
-        const slotStart = new Date(parsedDate.date);
-        slotStart.setHours(hour, minute, 0, 0);
+        const slotStart = parseUkDateTime(`${parsedDate.key}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`)!;
         const slotEnd = new Date(slotStart.getTime() + DEFAULT_SLOT_MINUTES * 60 * 1000);
         const booking = bookings.find((item) => item.dateTime < slotEnd && getBookingEndTime(item) > slotStart);
         const status = booking ? 'booked' : slotStart < now ? 'past' : 'available';
 
         slots.push({
           dateTime: slotStart.toISOString(),
-          label: slotStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          label: formatUkTime(slotStart),
           status,
           bookingId: booking ? String(booking._id) : undefined,
         });

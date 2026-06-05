@@ -7,6 +7,7 @@ import { Curriculum } from '../models/Curriculum.model';
 import { LiveClass } from '../models/LiveClass.model';
 import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting, ZoomApiError } from '../services/zoom.service';
 import { deleteRecordedLectureForLiveClass, syncRecordedLectureForLiveClass } from '../services/recordedLectureSync.service';
+import { parseUkDateTime } from '../utils/ukTime';
 
 const getObjectId = (value: any) => new mongoose.Types.ObjectId(value?._id || value);
 
@@ -199,7 +200,8 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
       }
 
       if (topic.scheduledAt) {
-        const scheduledAt = new Date(topic.scheduledAt);
+        const scheduledAt = parseUkDateTime(topic.scheduledAt);
+        if (!scheduledAt) continue;
         const zoomTopic = `Class ${classCounter} - ${title}`;
         const existingLiveClass = topic.liveClassId ? await LiveClass.findById(topic.liveClassId) : null;
         let meetingLink = manualMeetingLink || existingLiveClass?.meetingLink || '';

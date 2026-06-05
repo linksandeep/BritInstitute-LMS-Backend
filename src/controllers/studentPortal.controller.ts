@@ -10,6 +10,7 @@ import { Curriculum } from '../models/Curriculum.model';
 import { LectureProgress } from '../models/LectureProgress.model';
 import { LiveClass } from '../models/LiveClass.model';
 import { RecordedLecture } from '../models/RecordedLecture.model';
+import { formatUkDateTime } from '../utils/ukTime';
 
 const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
 
@@ -173,7 +174,7 @@ const buildAnnouncements = (snapshot: Awaited<ReturnType<typeof getStudentPortal
 
   announcements.push(
     snapshot.nextClass
-      ? `Next class: ${snapshot.nextClass.topic} at ${new Date(snapshot.nextClass.scheduledAt).toLocaleString()}.`
+      ? `Next class: ${snapshot.nextClass.topic} at ${formatUkDateTime(new Date(snapshot.nextClass.scheduledAt))}.`
       : 'Your next class schedule will appear here once published.'
   );
 
