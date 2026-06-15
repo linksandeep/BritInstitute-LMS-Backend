@@ -11,8 +11,18 @@ import { fetchZoomRecordingFile, ZoomApiError } from '../services/zoom.service';
 import { syncPendingZoomRecordings } from '../services/recordedLectureSync.service';
 
 type RequestUser = NonNullable<AuthRequest['user']>;
+type PlaybackMode = 'protected_stream' | 'blocked_external';
+type StreamTokenPayload = {
+  id: string;
+  role: RequestUser['role'];
+  username: string;
+  lectureId: string;
+  purpose: 'recorded-stream';
+};
 
 const staffRoles = ['teacher', 'admin', 'superadmin'];
+const isDirectVideoUrl = (url: string) => /\.(mp4|webm|ogg)(?:$|[?#])/i.test(url);
+const streamableResponseHeaders = ['content-length', 'content-range', 'accept-ranges'] as const;
 
 const getBearerToken = (req: AuthRequest): string | null => {
   const authHeader = req.headers.authorization;
@@ -36,6 +46,34 @@ const resolveRequestUser = async (req: AuthRequest): Promise<RequestUser | null>
   }
 };
 
+const resolveStreamTokenUser = async (req: AuthRequest): Promise<RequestUser | null> => {
+  const token = typeof req.query.streamToken === 'string' ? req.query.streamToken : null;
+  if (!token) return null;
+
+  try {
+    const decoded = jwt.verify(token, config.jwtSecret) as StreamTokenPayload;
+    if (decoded.purpose !== 'recorded-stream' || decoded.lectureId !== req.params.id) return null;
+    const user = await User.findById(decoded.id);
+    if (!user || !user.isActive) return null;
+    return { id: decoded.id, role: decoded.role, username: decoded.username };
+  } catch {
+    return null;
+  }
+};
+
+const createStreamToken = (lectureId: string, user: RequestUser): string =>
+  jwt.sign(
+    {
+      id: user.id,
+      role: user.role,
+      username: user.username,
+      lectureId,
+      purpose: 'recorded-stream',
+    },
+    config.jwtSecret,
+    { expiresIn: '2m' }
+  );
+
 const canAccessLecture = async (lecture: { batch: unknown }, user: RequestUser): Promise<boolean> => {
   if (staffRoles.includes(user.role)) return true;
 
@@ -54,6 +92,20 @@ const toClientLecture = (lecture: { toObject: () => any }) => {
   return {
     ...data,
     isPlayable: !isZoomRecording || (data.recordingStatus === 'available' && Boolean(data.zoomDownloadUrl)),
+  };
+};
+
+const toStudentLecture = (lecture: { toObject: () => any }) => {
+  const data = toClientLecture(lecture);
+  const isZoomRecording = data.recordingSource === 'zoom' || data.videoType === 'zoom';
+  const canUseProtectedStream = isZoomRecording || isDirectVideoUrl(String(data.videoUrl || ''));
+  const playbackMode: PlaybackMode = canUseProtectedStream ? 'protected_stream' : 'blocked_external';
+
+  return {
+    ...data,
+    playbackMode,
+    isPlayable: data.isPlayable && canUseProtectedStream,
+    videoUrl: '',
   };
 };
 
@@ -120,7 +172,7 @@ export const getStudentLectures = async (req: AuthRequest, res: Response): Promi
       visibleLectures.map(async (lec) => {
         const prog = await LectureProgress.findOne({ lecture: lec._id, student: req.user!.id });
         return {
-          ...toClientLecture(lec),
+          ...toStudentLecture(lec),
           isCompleted: prog ? prog.isCompleted : false,
           watchDuration: prog ? prog.watchDuration : 0,
         };
@@ -193,9 +245,35 @@ export const syncZoomRecordings = async (_req: AuthRequest, res: Response): Prom
   }
 };
 
+export const issueStreamToken = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const lecture = await RecordedLecture.findById(req.params.id);
+    if (!lecture) {
+      res.status(404).json({ success: false, message: 'Lecture not found' });
+      return;
+    }
+
+    const hasAccess = await canAccessLecture(lecture, req.user!);
+    if (!hasAccess) {
+      res.status(403).json({ success: false, message: 'You do not have access to this recorded lecture' });
+      return;
+    }
+
+    const isStreamable = lecture.recordingSource === 'zoom' || isDirectVideoUrl(lecture.videoUrl);
+    if (!isStreamable) {
+      res.status(409).json({ success: false, message: 'This recording cannot be played in protected LMS mode.' });
+      return;
+    }
+
+    res.json({ success: true, streamToken: createStreamToken(String(lecture._id), req.user!), expiresInSeconds: 120 });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Unable to prepare protected playback' });
+  }
+};
+
 export const streamLecture = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const user = await resolveRequestUser(req);
+    const user = await resolveStreamTokenUser(req);
     if (!user) {
       res.status(401).json({ success: false, message: 'Not authorized' });
       return;
@@ -227,13 +305,17 @@ export const streamLecture = async (req: AuthRequest, res: Response): Promise<vo
       const zoomResponse = await fetchZoomRecordingFile(lecture.zoomDownloadUrl, req.headers.range);
       res.status(zoomResponse.status);
 
-      for (const header of ['content-length', 'content-range', 'accept-ranges']) {
+      for (const header of streamableResponseHeaders) {
         const value = zoomResponse.headers.get(header);
         if (value) res.setHeader(header, value);
       }
       res.setHeader('Content-Type', 'video/mp4');
       res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('Content-Disposition', 'inline');
+      res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
       if (!zoomResponse.body) {
@@ -245,7 +327,43 @@ export const streamLecture = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    res.redirect(lecture.videoUrl);
+    if (!isDirectVideoUrl(lecture.videoUrl)) {
+      res.status(409).json({
+        success: false,
+        message: 'This recording is hosted by an external provider and cannot be protected by LMS streaming.',
+      });
+      return;
+    }
+
+    const upstreamResponse = await fetch(lecture.videoUrl, {
+      headers: req.headers.range ? { Range: req.headers.range } : undefined,
+    });
+
+    if (!upstreamResponse.ok && upstreamResponse.status !== 206) {
+      res.status(502).json({ success: false, message: 'Unable to stream recorded lecture' });
+      return;
+    }
+
+    res.status(upstreamResponse.status);
+    for (const header of streamableResponseHeaders) {
+      const value = upstreamResponse.headers.get(header);
+      if (value) res.setHeader(header, value);
+    }
+    res.setHeader('Content-Type', upstreamResponse.headers.get('content-type') || 'video/mp4');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+    if (!upstreamResponse.body) {
+      res.status(502).json({ success: false, message: 'Recording stream is empty' });
+      return;
+    }
+
+    Readable.fromWeb(upstreamResponse.body as never).pipe(res);
   } catch (err) {
     const message = err instanceof ZoomApiError ? err.message : 'Unable to stream recorded lecture';
     res.status(err instanceof ZoomApiError ? 502 : 500).json({ success: false, message });

@@ -9,6 +9,7 @@ import {
   updateLecture, 
   deleteLecture,
   updateProgress,
+  issueStreamToken,
   streamLecture,
   syncZoomRecordings
 } from '../controllers/recorded.controller';
@@ -17,6 +18,7 @@ const router = Router();
 
 // Student routes
 router.get('/me', protect, getStudentLectures);
+router.post('/:id/stream-token', protect, issueStreamToken);
 router.get('/:id/stream', streamLecture);
 router.post('/:id/progress', protect, updateProgress);
 
