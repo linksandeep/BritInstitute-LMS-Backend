@@ -71,7 +71,7 @@ const createStreamToken = (lectureId: string, user: RequestUser): string =>
       purpose: 'recorded-stream',
     },
     config.jwtSecret,
-    { expiresIn: '2m' }
+    { expiresIn: '4h' }
   );
 
 const canAccessLecture = async (lecture: { batch: unknown }, user: RequestUser): Promise<boolean> => {
@@ -187,7 +187,7 @@ export const getStudentLectures = async (req: AuthRequest, res: Response): Promi
 export const updateProgress = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params; // lecture ID
-    const { watchDuration, isCompleted } = req.body;
+    const { watchDuration, isCompleted, playbackPosition } = req.body;
     const student = req.user!.id;
 
     const lecture = await RecordedLecture.findById(id);
@@ -202,10 +202,16 @@ export const updateProgress = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
+    const nextPosition = Number(playbackPosition);
+    const progressSet: Record<string, unknown> = { lecture: id, student, batch: lecture.batch };
+    if (Number.isFinite(nextPosition) && nextPosition >= 0) {
+      progressSet.lastPosition = nextPosition;
+    }
+
     const prog = await LectureProgress.findOneAndUpdate(
       { lecture: id, student },
-      { 
-        $set: { lecture: id, student, batch: lecture.batch },
+      {
+        $set: progressSet,
         $max: { watchDuration: watchDuration || 0 }
       },
       { upsert: true, new: true }
@@ -265,7 +271,7 @@ export const issueStreamToken = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    res.json({ success: true, streamToken: createStreamToken(String(lecture._id), req.user!), expiresInSeconds: 120 });
+    res.json({ success: true, streamToken: createStreamToken(String(lecture._id), req.user!), expiresInSeconds: 14400 });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Unable to prepare protected playback' });
   }

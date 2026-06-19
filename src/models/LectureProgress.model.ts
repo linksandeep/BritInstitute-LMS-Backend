@@ -5,6 +5,7 @@ export interface ILectureProgress extends Document {
   student: mongoose.Types.ObjectId;
   batch: mongoose.Types.ObjectId;
   watchDuration: number; // in seconds
+  lastPosition: number; // last video playback position in seconds
   isCompleted: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -16,6 +17,7 @@ const lectureProgressSchema = new Schema<ILectureProgress>(
     student: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     batch: { type: Schema.Types.ObjectId, ref: 'Batch', required: true },
     watchDuration: { type: Number, default: 0 },
+    lastPosition: { type: Number, default: 0 },
     isCompleted: { type: Boolean, default: false },
   },
   { timestamps: true }
