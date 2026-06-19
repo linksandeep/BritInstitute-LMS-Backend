@@ -210,11 +210,33 @@ const syncLiveClassesForCurriculum = async (curriculum: any, modules: any[], adm
         let zoomStartUrl = existingLiveClass?.zoomStartUrl;
 
         if (existingLiveClass?.zoomMeetingId) {
-          await updateZoomMeeting(existingLiveClass.zoomMeetingId, {
-            topic: zoomTopic,
-            startTime: scheduledAt,
-            duration,
-          });
+          try {
+            await updateZoomMeeting(existingLiveClass.zoomMeetingId, {
+              topic: zoomTopic,
+              startTime: scheduledAt,
+              duration,
+            });
+          } catch (error) {
+            const meetingMissing = error instanceof ZoomApiError
+              && (error.status === 404 || /meeting does not exist/i.test(error.message));
+            if (!meetingMissing) throw error;
+
+            if (manualMeetingLink) {
+              zoomMeetingId = undefined;
+              zoomMeetingUuid = undefined;
+              zoomStartUrl = undefined;
+            } else {
+              const replacementMeeting = await createZoomMeeting({
+                topic: zoomTopic,
+                startTime: scheduledAt,
+                duration,
+              });
+              meetingLink = replacementMeeting.join_url;
+              zoomMeetingId = String(replacementMeeting.id);
+              zoomMeetingUuid = replacementMeeting.uuid;
+              zoomStartUrl = replacementMeeting.start_url;
+            }
+          }
         } else if (!manualMeetingLink) {
           const zoomMeeting = await createZoomMeeting({
             topic: zoomTopic,
