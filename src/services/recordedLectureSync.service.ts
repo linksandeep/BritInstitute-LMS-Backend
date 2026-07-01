@@ -36,6 +36,13 @@ export const syncRecordedLectureForLiveClass = async (liveClass: ILiveClass): Pr
   const title = `${liveClass.classNumber} - ${liveClass.topic}`;
   const existing = await RecordedLecture.findOne({ liveClass: liveClass._id });
 
+  if (existing?.recordingSource === 'manual') {
+    existing.batch = liveClass.batch;
+    existing.order = new Date(liveClass.scheduledAt).getTime();
+    await existing.save();
+    return;
+  }
+
   if (existing?.recordingSource === 'zoom' && existing.recordingStatus === 'available' && existing.zoomDownloadUrl) {
     existing.batch = liveClass.batch;
     existing.title = title;
@@ -67,6 +74,9 @@ export const syncZoomRecordingForLiveClass = async (
   liveClass: ILiveClass,
   recordingPayload?: ZoomRecordingsResponse
 ): Promise<boolean> => {
+  const existing = await RecordedLecture.findOne({ liveClass: liveClass._id });
+  if (existing?.recordingSource === 'manual') return false;
+
   const identifiers = [
     liveClass.zoomMeetingUuid,
     liveClass.zoomMeetingId,

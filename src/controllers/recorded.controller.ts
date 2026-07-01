@@ -2,7 +2,7 @@ import { Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { Readable } from 'stream';
 import { AuthRequest } from '../middleware/auth.middleware';
-import { RecordedLecture } from '../models/RecordedLecture.model';
+import { RecordedLecture, VideoType } from '../models/RecordedLecture.model';
 import { LectureProgress } from '../models/LectureProgress.model';
 import { Batch } from '../models/Batch.model';
 import { User } from '../models/User.model';
@@ -23,6 +23,7 @@ type StreamTokenPayload = {
 const staffRoles = ['teacher', 'admin', 'superadmin'];
 const isDirectVideoUrl = (url: string) => /\.(mp4|webm|ogg)(?:$|[?#])/i.test(url);
 const streamableResponseHeaders = ['content-length', 'content-range', 'accept-ranges'] as const;
+const videoTypes: VideoType[] = ['youtube', 'drive', 'google_meet', 'zoom', 'other'];
 
 const getBearerToken = (req: AuthRequest): string | null => {
   const authHeader = req.headers.authorization;
@@ -88,7 +89,7 @@ const canAccessLecture = async (lecture: { batch: unknown }, user: RequestUser):
 
 const toClientLecture = (lecture: { toObject: () => any }) => {
   const data = lecture.toObject();
-  const isZoomRecording = data.recordingSource === 'zoom' || data.videoType === 'zoom';
+  const isZoomRecording = data.recordingSource === 'zoom';
   return {
     ...data,
     isPlayable: !isZoomRecording || (data.recordingStatus === 'available' && Boolean(data.zoomDownloadUrl)),
@@ -97,17 +98,25 @@ const toClientLecture = (lecture: { toObject: () => any }) => {
 
 const toStudentLecture = (lecture: { toObject: () => any }) => {
   const data = toClientLecture(lecture);
-  const isZoomRecording = data.recordingSource === 'zoom' || data.videoType === 'zoom';
+  const isZoomRecording = data.recordingSource === 'zoom';
   const canUseProtectedStream = isZoomRecording || isDirectVideoUrl(String(data.videoUrl || ''));
   const playbackMode: PlaybackMode = canUseProtectedStream ? 'protected_stream' : 'blocked_external';
+  const shouldHideSourceUrl = canUseProtectedStream || data.recordingSource === 'zoom';
 
   return {
     ...data,
     playbackMode,
-    isPlayable: data.isPlayable && canUseProtectedStream,
-    videoUrl: '',
+    isPlayable: data.isPlayable && (canUseProtectedStream || data.recordingSource === 'manual'),
+    videoUrl: shouldHideSourceUrl ? '' : data.videoUrl,
   };
 };
+
+const getVideoType = (value: unknown): VideoType => {
+  const type = String(value || 'other');
+  return videoTypes.includes(type as VideoType) ? type as VideoType : 'other';
+};
+
+const getCleanString = (value: unknown) => String(value || '').trim();
 
 export const createRecordedLecture = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -378,12 +387,53 @@ export const streamLecture = async (req: AuthRequest, res: Response): Promise<vo
 
 export const updateLecture = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const lecture = await RecordedLecture.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const lecture = await RecordedLecture.findById(req.params.id);
     if (!lecture) {
       res.status(404).json({ success: false, message: 'Lecture not found' });
       return;
     }
-    res.json({ success: true, lecture });
+
+    if (req.body.batch !== undefined) lecture.batch = req.body.batch;
+    if (req.body.title !== undefined) {
+      const title = getCleanString(req.body.title);
+      if (!title) {
+        res.status(400).json({ success: false, message: 'Lecture title is required' });
+        return;
+      }
+      lecture.title = title;
+    }
+    if (req.body.description !== undefined) lecture.description = getCleanString(req.body.description);
+    if (req.body.videoType !== undefined) lecture.videoType = getVideoType(req.body.videoType);
+    if (req.body.order !== undefined) {
+      const order = Number(req.body.order);
+      lecture.order = Number.isFinite(order) ? order : 0;
+    }
+
+    if (req.body.videoUrl !== undefined) {
+      const videoUrl = getCleanString(req.body.videoUrl);
+      if (!videoUrl) {
+        res.status(400).json({ success: false, message: 'Video URL is required' });
+        return;
+      }
+
+      const replacingRecording = videoUrl !== lecture.videoUrl || req.body.replaceRecording === true;
+      lecture.videoUrl = videoUrl;
+
+      if (replacingRecording) {
+        lecture.recordingSource = 'manual';
+        lecture.recordingStatus = 'available';
+        lecture.zoomRecordingFileId = undefined;
+        lecture.zoomRecordingMeetingId = undefined;
+        lecture.zoomDownloadUrl = undefined;
+        lecture.zoomPlayUrl = undefined;
+        lecture.zoomShareUrl = undefined;
+        lecture.recordingStartedAt = undefined;
+        lecture.recordingCompletedAt = undefined;
+      }
+    }
+
+    await lecture.save();
+    res.json({ success: true, lecture: toClientLecture(lecture) });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error', error: err });
   }
