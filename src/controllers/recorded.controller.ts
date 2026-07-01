@@ -8,7 +8,8 @@ import { Batch } from '../models/Batch.model';
 import { User } from '../models/User.model';
 import { config } from '../config/env';
 import { fetchZoomRecordingFile, ZoomApiError } from '../services/zoom.service';
-import { syncPendingZoomRecordings } from '../services/recordedLectureSync.service';
+import { syncPendingZoomRecordings, syncZoomRecordingForLiveClass } from '../services/recordedLectureSync.service';
+import { LiveClass } from '../models/LiveClass.model';
 
 type RequestUser = NonNullable<AuthRequest['user']>;
 type PlaybackMode = 'protected_stream' | 'blocked_external';
@@ -262,7 +263,7 @@ export const syncZoomRecordings = async (_req: AuthRequest, res: Response): Prom
 
 export const issueStreamToken = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const lecture = await RecordedLecture.findById(req.params.id);
+    let lecture = await RecordedLecture.findById(req.params.id);
     if (!lecture) {
       res.status(404).json({ success: false, message: 'Lecture not found' });
       return;
@@ -272,6 +273,18 @@ export const issueStreamToken = async (req: AuthRequest, res: Response): Promise
     if (!hasAccess) {
       res.status(403).json({ success: false, message: 'You do not have access to this recorded lecture' });
       return;
+    }
+
+    if (lecture.recordingSource !== 'zoom' && lecture.videoType === 'zoom' && lecture.liveClass) {
+      const liveClass = await LiveClass.findById(lecture.liveClass);
+      if (liveClass) {
+        await syncZoomRecordingForLiveClass(liveClass);
+        lecture = await RecordedLecture.findById(req.params.id);
+        if (!lecture) {
+          res.status(404).json({ success: false, message: 'Lecture not found' });
+          return;
+        }
+      }
     }
 
     const isStreamable = lecture.recordingSource === 'zoom' || isDirectVideoUrl(lecture.videoUrl);

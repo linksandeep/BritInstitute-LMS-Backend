@@ -75,7 +75,7 @@ export const syncZoomRecordingForLiveClass = async (
   recordingPayload?: ZoomRecordingsResponse
 ): Promise<boolean> => {
   const existing = await RecordedLecture.findOne({ liveClass: liveClass._id });
-  if (existing?.recordingSource === 'manual') return false;
+  if (existing?.recordingSource === 'manual' && existing.videoType !== 'zoom') return false;
 
   const identifiers = [
     liveClass.zoomMeetingUuid,
@@ -164,6 +164,7 @@ export const syncPendingZoomRecordings = async (): Promise<{ checked: number; im
     $or: [
       { recordingSource: 'zoom', recordingStatus: 'pending' },
       { recordingStatus: { $exists: false } },
+      { recordingSource: 'manual', videoType: 'zoom' },
       { recordingSource: 'zoom', recordingStatus: 'available', zoomDownloadUrl: { $exists: false } },
       { recordingSource: 'zoom', recordingStatus: 'available', zoomDownloadUrl: '' },
     ],
