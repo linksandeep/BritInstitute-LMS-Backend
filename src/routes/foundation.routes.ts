@@ -5,12 +5,16 @@ import {
   createFoundationResource,
   deleteFoundationResource,
   getFoundationResources,
+  issueFoundationStreamToken,
+  streamFoundationResource,
   updateFoundationResource,
 } from '../controllers/foundation.controller';
 
 const router = Router();
 
 router.get('/', protect, getFoundationResources);
+router.post('/:id/stream-token', protect, issueFoundationStreamToken);
+router.get('/:id/stream', streamFoundationResource);
 router.post('/', protect, adminOnly, createFoundationResource);
 router.put('/:id', protect, adminOnly, updateFoundationResource);
 router.delete('/:id', protect, adminOnly, deleteFoundationResource);
