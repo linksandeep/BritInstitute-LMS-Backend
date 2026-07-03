@@ -16,13 +16,18 @@ import superAdminRoutes from './routes/superadmin.routes';
 import zoomWebhookRoutes from './routes/zoomWebhook.routes';
 import studentPortalRoutes from './routes/studentPortal.routes';
 import foundationRoutes from './routes/foundation.routes';
+import studyMaterialRoutes from './routes/studyMaterial.routes';
 import { startAttendanceJob } from './jobs/attendance.job';
 
 const app: Application = express();
 const allowedOrigins = Array.from(new Set([
   config.frontendUrl,
   'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
   'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+  'http://127.0.0.1:5175',
 ]));
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
@@ -55,6 +60,7 @@ app.use('/api/curriculums', curriculumRoutes);
 app.use('/api/superadmin', superAdminRoutes);
 app.use('/api/student-portal', studentPortalRoutes);
 app.use('/api/foundation', foundationRoutes);
+app.use('/api/study-materials', studyMaterialRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((_req: Request, res: Response) => {
