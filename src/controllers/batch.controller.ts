@@ -10,6 +10,8 @@ import { RecordedLecture } from '../models/RecordedLecture.model';
 import { Assignment } from '../models/Assignment.model';
 import { parseUkDateTime } from '../utils/ukTime';
 
+const BATCH_DELETE_PIN = '4545';
+
 // ─── Create Batch ─────────────────────────────────────────────────────────────
 export const createBatch = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -104,6 +106,11 @@ export const updateBatch = async (req: AuthRequest, res: Response): Promise<void
 // ─── Delete Batch ─────────────────────────────────────────────────────────────
 export const deleteBatch = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    if (String(req.body?.pin || '').trim() !== BATCH_DELETE_PIN) {
+      res.status(403).json({ success: false, message: 'Invalid batch delete PIN' });
+      return;
+    }
+
     const batch = await Batch.findByIdAndDelete(req.params.id);
     if (!batch) {
       res.status(404).json({ success: false, message: 'Batch not found' });
