@@ -17,7 +17,10 @@ import zoomWebhookRoutes from './routes/zoomWebhook.routes';
 import studentPortalRoutes from './routes/studentPortal.routes';
 import foundationRoutes from './routes/foundation.routes';
 import studyMaterialRoutes from './routes/studyMaterial.routes';
+import licenseRoutes from './routes/license.routes';
 import { startAttendanceJob } from './jobs/attendance.job';
+import { requireSoftwareLicense } from './middleware/license.middleware';
+import { refreshSoftwareLicenseStatus, startSoftwareLicenseMonitor } from './services/license.service';
 
 const app: Application = express();
 const allowedOrigins = Array.from(new Set([
@@ -49,6 +52,8 @@ app.get('/', (_req: Request, res: Response) => {
 });
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
+app.use('/api/license', licenseRoutes);
+app.use(requireSoftwareLicense);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/live-classes', liveClassRoutes);
@@ -70,6 +75,8 @@ app.use((_req: Request, res: Response) => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 const start = async (): Promise<void> => {
   await connectDB();
+  await refreshSoftwareLicenseStatus();
+  startSoftwareLicenseMonitor();
   startAttendanceJob();
   app.listen(config.port, () => {
     console.log(`🚀 Server running on http://localhost:${config.port}`);

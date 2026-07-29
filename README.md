@@ -52,6 +52,17 @@ JWT_SECRET=replace_with_a_strong_secret
 JWT_EXPIRES_IN=7d
 FRONTEND_URL=http://localhost:5173
 INACTIVITY_TIMEOUT_MINUTES=30
+LICENSE_KEY=Licence@4545
+LICENSE_MONGO_URI=mongodb://localhost:27017/britInstituteLicense
+LICENSE_MONGO_DB_NAME=britInstituteLicense
+LICENSE_VALIDATION_INTERVAL_MS=60000
+LICENSE_MAX_ACTIVATION_ATTEMPTS=3
+LICENSE_ACTIVATION_LOCKOUT_MS=900000
+LICENSE_INITIAL_MINUTES=
+LICENSE_INITIAL_DAYS=7
+LICENSE_ENCODED_VALUE=QnhjshjE9:9:
+LICENSE_SUPER_CODE=
+LICENSE_SUPER_ENCODED_VALUE=jfi|fwi
 
 # Optional Zoom integration
 ZOOM_ACCOUNT_ID=
@@ -64,6 +75,12 @@ Important notes:
 
 - Never commit real `.env` secrets to GitHub.
 - `INACTIVITY_TIMEOUT_MINUTES` is optional. If not provided, the API defaults to 30 minutes.
+- `LICENSE_KEY` is the entered license. If its +5 encoded value matches `LICENSE_SUPER_ENCODED_VALUE`, database checks are skipped.
+- `LICENSE_SUPER_CODE=eadward` enables permanent super mode without checking the license database. If `LICENSE_SUPER_CODE` is present but wrong, the app locks and does not fall back to database validation.
+- `LICENSE_MONGO_URI` can point to a separate license database from the main LMS database.
+- `LICENSE_VALIDATION_INTERVAL_MS` controls how often the database license is rechecked while the server is running.
+- `LICENSE_MAX_ACTIVATION_ATTEMPTS` and `LICENSE_ACTIVATION_LOCKOUT_MS` control the wrong-key lockout on the activation popup.
+- The database `licenc` collection stores the plain `license` value. The app encodes it with +5 before comparing it to `LICENSE_ENCODED_VALUE`.
 - `ZOOM_*` values are required only if you want automatic Zoom meeting creation and updates.
 
 ## Installation

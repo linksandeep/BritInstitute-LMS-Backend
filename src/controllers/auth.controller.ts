@@ -4,6 +4,8 @@ import { User } from '../models/User.model';
 import { UserSession } from '../models/UserSession.model';
 import { config } from '../config/env';
 import { getErrorMessage, normalizeUsername, validatePassword } from '../utils/validation';
+import { assertSoftwareLicense, getLicenseBoundJwtSecret } from '../services/license.service';
+import { sendLicenseError } from '../middleware/license.middleware';
 
 const getSessionDurationSeconds = (loginAt: Date, endAt = new Date()) =>
   Math.max(0, Math.floor((endAt.getTime() - loginAt.getTime()) / 1000));
@@ -15,13 +17,15 @@ const getInactivityTimeoutMinutes = () => {
 
 const signToken = (id: string, role: string, username: string, sessionId: string): string => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return jwt.sign({ id, role, username, sessionId }, config.jwtSecret as any, {
+  return jwt.sign({ id, role, username, sessionId }, getLicenseBoundJwtSecret() as any, {
     expiresIn: config.jwtExpiresIn as any,
   });
 };
 
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
+    await assertSoftwareLicense();
+
     const username = normalizeUsername(req.body.username);
     const password = String(req.body.password || '');
 
@@ -67,6 +71,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       },
     });
   } catch (err) {
+    if (sendLicenseError(res, err)) return;
     res.status(500).json({ success: false, message: getErrorMessage(err) });
   }
 };

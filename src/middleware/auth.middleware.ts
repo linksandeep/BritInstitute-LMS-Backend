@@ -1,7 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { config } from '../config/env';
 import { User } from '../models/User.model';
+import { assertSoftwareLicense, getLicenseBoundJwtSecret } from '../services/license.service';
+import { sendLicenseError } from './license.middleware';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -14,6 +15,8 @@ export interface AuthRequest extends Request {
 
 export const protect = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
+    await assertSoftwareLicense();
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       res.status(401).json({ success: false, message: 'Not authorized, no token' });
@@ -21,7 +24,7 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
     }
 
     const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, config.jwtSecret) as { id: string; role: string; username: string; sessionId?: string };
+    const decoded = jwt.verify(token, getLicenseBoundJwtSecret()) as { id: string; role: string; username: string; sessionId?: string };
 
     const user = await User.findById(decoded.id);
     if (!user || !user.isActive) {
@@ -31,7 +34,8 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
 
     req.user = { id: decoded.id, role: decoded.role, username: decoded.username, sessionId: decoded.sessionId };
     next();
-  } catch {
+  } catch (err) {
+    if (sendLicenseError(res, err)) return;
     res.status(401).json({ success: false, message: 'Invalid token' });
   }
 };
