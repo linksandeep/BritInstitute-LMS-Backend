@@ -17,6 +17,7 @@ import zoomWebhookRoutes from './routes/zoomWebhook.routes';
 import studentPortalRoutes from './routes/studentPortal.routes';
 import foundationRoutes from './routes/foundation.routes';
 import studyMaterialRoutes from './routes/studyMaterial.routes';
+import projectRoutes from './routes/project.routes';
 import { startAttendanceJob } from './jobs/attendance.job';
 
 const app: Application = express();
@@ -61,6 +62,7 @@ app.use('/api/superadmin', superAdminRoutes);
 app.use('/api/student-portal', studentPortalRoutes);
 app.use('/api/foundation', foundationRoutes);
 app.use('/api/study-materials', studyMaterialRoutes);
+app.use('/api/projects', projectRoutes);
 
 // ─── 404 ──────────────────────────────────────────────────────────────────────
 app.use((_req: Request, res: Response) => {
