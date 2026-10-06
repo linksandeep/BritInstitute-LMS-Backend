@@ -5,21 +5,13 @@ import { AuthRequest } from '../middleware/auth.middleware';
 import { projectUploadDir } from '../middleware/projectUpload.middleware';
 import { Batch } from '../models/Batch.model';
 import { Project, ProjectResourceType } from '../models/Project.model';
+import { isValidProjectResourceUrl } from '../utils/projectResource';
 
 const cleanString = (value: unknown) => String(value || '').trim();
 
 const parseSkills = (value: unknown): string[] => {
   const values = Array.isArray(value) ? value : cleanString(value).split(',');
   return Array.from(new Set(values.map(cleanString).filter(Boolean))).slice(0, 20);
-};
-
-const isGoogleDriveUrl = (value: string): boolean => {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' && ['drive.google.com', 'docs.google.com'].includes(url.hostname.toLowerCase());
-  } catch {
-    return false;
-  }
 };
 
 const removeUploadedFile = async (fileName?: string): Promise<void> => {
@@ -71,7 +63,7 @@ export const createProject = async (req: AuthRequest, res: Response): Promise<vo
     const resourceType = cleanString(req.body.resourceType) as ProjectResourceType;
     const resourceUrl = cleanString(req.body.resourceUrl);
 
-    if (!batch || !name || !['drive', 'zip'].includes(resourceType)) {
+    if (!batch || !name || !['drive', 'github', 'zip'].includes(resourceType)) {
       await removeRequestFile(req);
       res.status(400).json({ success: false, message: 'Batch, project name and resource type are required' });
       return;
@@ -81,12 +73,12 @@ export const createProject = async (req: AuthRequest, res: Response): Promise<vo
       res.status(404).json({ success: false, message: 'Batch not found' });
       return;
     }
-    if (resourceType === 'drive' && !isGoogleDriveUrl(resourceUrl)) {
+    if (resourceType !== 'zip' && !isValidProjectResourceUrl(resourceType, resourceUrl)) {
       await removeRequestFile(req);
-      res.status(400).json({ success: false, message: 'Enter a valid Google Drive link' });
+      res.status(400).json({ success: false, message: resourceType === 'github' ? 'Enter a valid GitHub repository link' : 'Enter a valid Google Drive link' });
       return;
     }
-    if (resourceType === 'drive' && req.file) {
+    if (resourceType !== 'zip' && req.file) {
       await removeRequestFile(req);
       req.file = undefined;
     }
@@ -101,7 +93,7 @@ export const createProject = async (req: AuthRequest, res: Response): Promise<vo
       description: cleanString(req.body.description),
       skills: parseSkills(req.body.skills),
       resourceType,
-      resourceUrl: resourceType === 'drive' ? resourceUrl : undefined,
+      resourceUrl: resourceType !== 'zip' ? resourceUrl : undefined,
       fileName: resourceType === 'zip' ? req.file?.filename : undefined,
       originalFileName: resourceType === 'zip' ? req.file?.originalname : undefined,
       uploadedBy: req.user!.id,
@@ -130,7 +122,7 @@ export const updateProject = async (req: AuthRequest, res: Response): Promise<vo
     const nextType = (req.body.resourceType === undefined ? project.resourceType : cleanString(req.body.resourceType)) as ProjectResourceType;
     const nextUrl = req.body.resourceUrl === undefined ? cleanString(project.resourceUrl) : cleanString(req.body.resourceUrl);
 
-    if (!nextBatch || !nextName || !['drive', 'zip'].includes(nextType)) {
+    if (!nextBatch || !nextName || !['drive', 'github', 'zip'].includes(nextType)) {
       await removeRequestFile(req);
       res.status(400).json({ success: false, message: 'Batch, project name and resource type are required' });
       return;
@@ -140,12 +132,12 @@ export const updateProject = async (req: AuthRequest, res: Response): Promise<vo
       res.status(404).json({ success: false, message: 'Batch not found' });
       return;
     }
-    if (nextType === 'drive' && !isGoogleDriveUrl(nextUrl)) {
+    if (nextType !== 'zip' && !isValidProjectResourceUrl(nextType, nextUrl)) {
       await removeRequestFile(req);
-      res.status(400).json({ success: false, message: 'Enter a valid Google Drive link' });
+      res.status(400).json({ success: false, message: nextType === 'github' ? 'Enter a valid GitHub repository link' : 'Enter a valid Google Drive link' });
       return;
     }
-    if (nextType === 'drive' && req.file) {
+    if (nextType !== 'zip' && req.file) {
       await removeRequestFile(req);
       req.file = undefined;
     }
@@ -160,13 +152,13 @@ export const updateProject = async (req: AuthRequest, res: Response): Promise<vo
     project.description = req.body.description === undefined ? project.description : cleanString(req.body.description);
     project.skills = req.body.skills === undefined ? project.skills : parseSkills(req.body.skills);
     project.resourceType = nextType;
-    project.resourceUrl = nextType === 'drive' ? nextUrl : undefined;
+    project.resourceUrl = nextType !== 'zip' ? nextUrl : undefined;
     project.fileName = nextType === 'zip' ? (req.file?.filename || project.fileName) : undefined;
     project.originalFileName = nextType === 'zip' ? (req.file?.originalname || project.originalFileName) : undefined;
     await project.save();
     projectSaved = true;
 
-    if (oldFileName && (nextType === 'drive' || (req.file && oldFileName !== req.file.filename))) {
+    if (oldFileName && (nextType !== 'zip' || (req.file && oldFileName !== req.file.filename))) {
       await removeUploadedFile(oldFileName).catch(() => undefined);
     }
 

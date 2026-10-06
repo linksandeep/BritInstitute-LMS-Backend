@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
-export type ProjectResourceType = 'drive' | 'zip';
+export type ProjectResourceType = 'drive' | 'github' | 'zip';
 
 export interface IProject extends Document {
   batch: mongoose.Types.ObjectId;
@@ -22,7 +22,7 @@ const projectSchema = new Schema<IProject>(
     name: { type: String, required: true, trim: true },
     description: { type: String, default: '', trim: true },
     skills: [{ type: String, trim: true }],
-    resourceType: { type: String, enum: ['drive', 'zip'], required: true },
+    resourceType: { type: String, enum: ['drive', 'github', 'zip'], required: true },
     resourceUrl: { type: String, trim: true },
     fileName: { type: String, select: false },
     originalFileName: { type: String, trim: true },
